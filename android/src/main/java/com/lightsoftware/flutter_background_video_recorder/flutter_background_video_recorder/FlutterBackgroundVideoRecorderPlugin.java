@@ -111,6 +111,7 @@ public class FlutterBackgroundVideoRecorderPlugin extends BroadcastReceiver impl
         break;
       case "startVideoRecording":
         if (mRecordingStatus == STATUS_STOPPED) {
+          checkPermissions();
           if (hasRecordingPermissions()) {
             Intent backgroundServiceStartIntent = new Intent(mContext, VideoRecorderService.class);
             mActivity.startService(backgroundServiceStartIntent);

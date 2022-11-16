@@ -1,3 +1,7 @@
+## 0.0.4
+
+* Fixed an issue that caused start recording to fail for the first time
+
 ## 0.0.3
 
 * Removed permission to draw over other apps
