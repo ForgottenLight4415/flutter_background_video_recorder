@@ -16,10 +16,8 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.ServiceConnection;
 import android.content.pm.PackageManager;
-import android.net.Uri;
 import android.os.Build;
 import android.os.IBinder;
-import android.provider.Settings;
 import android.util.Log;
 import android.widget.Toast;
 
@@ -29,7 +27,6 @@ import androidx.core.content.ContextCompat;
 import java.util.HashMap;
 import java.util.Map;
 
-import flutter_bvr_service.VideoRecorderService;
 import io.flutter.embedding.engine.plugins.FlutterPlugin;
 import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding;
 import io.flutter.plugin.common.EventChannel;
@@ -38,6 +35,8 @@ import io.flutter.plugin.common.MethodChannel;
 import io.flutter.plugin.common.MethodChannel.MethodCallHandler;
 import io.flutter.plugin.common.MethodChannel.Result;
 import io.flutter.plugin.common.PluginRegistry;
+
+import flutter_bvr_service.VideoRecorderService;
 
 /** FlutterBackgroundVideoRecorderPlugin */
 public class FlutterBackgroundVideoRecorderPlugin extends BroadcastReceiver implements FlutterPlugin, MethodCallHandler, ActivityAware, PluginRegistry.RequestPermissionsResultListener, EventChannel.StreamHandler {
@@ -69,7 +68,7 @@ public class FlutterBackgroundVideoRecorderPlugin extends BroadcastReceiver impl
   private final ServiceConnection mConnection = new ServiceConnection() {
     @Override
     public void onServiceConnected(ComponentName className, IBinder service) {
-      Log.d(TAG, "Service connected");
+      Log.i(TAG, "Connection to service established.");
       VideoRecorderService.LocalBinder binder = (VideoRecorderService.LocalBinder) service;
       mVideoRecordingService = binder.getServerInstance();
       boolean isRecording = mVideoRecordingService.getRecordingStatus();
@@ -85,19 +84,20 @@ public class FlutterBackgroundVideoRecorderPlugin extends BroadcastReceiver impl
 
     @Override
     public void onServiceDisconnected(ComponentName arg0) {
-      Log.d(TAG, "Service disconnected");
+      Log.i(TAG, "Service disconnected");
     }
   };
 
   @Override
   public void onAttachedToEngine(@NonNull FlutterPluginBinding flutterPluginBinding) {
+    mContext = flutterPluginBinding.getApplicationContext();
+
     channel = new MethodChannel(flutterPluginBinding.getBinaryMessenger(), "flutter_background_video_recorder");
     channel.setMethodCallHandler(this);
 
     eventChannel = new EventChannel(flutterPluginBinding.getBinaryMessenger(), "flutter_background_video_recorder_event");
     eventChannel.setStreamHandler(this);
 
-    mContext = flutterPluginBinding.getApplicationContext();
     IntentFilter filter = new IntentFilter(RECORDING_RECEIVER);
     filter.addCategory(Intent.CATEGORY_DEFAULT);
     mContext.registerReceiver(this, filter);
@@ -111,12 +111,12 @@ public class FlutterBackgroundVideoRecorderPlugin extends BroadcastReceiver impl
         break;
       case "startVideoRecording":
         if (mRecordingStatus == STATUS_STOPPED) {
-          if (shouldStartRecording()) {
+          if (hasRecordingPermissions()) {
             Intent backgroundServiceStartIntent = new Intent(mContext, VideoRecorderService.class);
             mActivity.startService(backgroundServiceStartIntent);
             mActivity.bindService(backgroundServiceStartIntent, mConnection, BIND_AUTO_CREATE);
           } else {
-            Log.d(TAG, "Permissions not satisfied");
+            Log.i(TAG, "Permissions not satisfied.");
             checkPermissions();
           }
           result.success(true);
@@ -128,7 +128,7 @@ public class FlutterBackgroundVideoRecorderPlugin extends BroadcastReceiver impl
         if (mRecordingStatus == STATUS_RECORDING) {
           String mVideoFileName = mVideoRecordingService.stopVideoRecording();
           mActivity.unbindService(mConnection);
-          Toast.makeText(mContext, "File saved: " + mVideoFileName, Toast.LENGTH_SHORT).show();
+          showToast("File saved: " + mVideoFileName);
           result.success(mVideoFileName);
         } else {
           result.error(Integer.toString(11), "Recording stopped", "Recording already stopped");
@@ -147,52 +147,56 @@ public class FlutterBackgroundVideoRecorderPlugin extends BroadcastReceiver impl
   }
 
   private void checkPermissions() {
+    Log.i(TAG, "Checking required permissions");
+    // Android 28 (P or Pie) and lower versions need WRITE_EXTERNAL_STORAGE and READ_EXTERNAL_STORAGE permission to access file system.
     if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.P) {
-      if (ContextCompat.checkSelfPermission(mContext, Manifest.permission.WRITE_EXTERNAL_STORAGE) !=
-              PackageManager.PERMISSION_GRANTED) {
-        if (shouldShowRequestPermissionRationale(mActivity, Manifest.permission.WRITE_EXTERNAL_STORAGE)) {
-          Toast.makeText(mContext, "Write permission is required to save videos", Toast.LENGTH_SHORT).show();
+      final String writePermission = Manifest.permission.WRITE_EXTERNAL_STORAGE;
+      final String readPermission = Manifest.permission.READ_EXTERNAL_STORAGE;
+      final int writePermissionStatus = ContextCompat.checkSelfPermission(mContext, writePermission);
+      final int readPermissionStatus = ContextCompat.checkSelfPermission(mContext, readPermission);
+      if (writePermissionStatus != PackageManager.PERMISSION_GRANTED || readPermissionStatus != PackageManager.PERMISSION_GRANTED) {
+        if (shouldShowRequestPermissionRationale(mActivity, writePermission) || shouldShowRequestPermissionRationale(mActivity, readPermission)) {
+          showToast("Read/write permission is required to create and store videos.");
         }
-        requestPermissions(mActivity, new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE}, REQUEST_WRITE_PERMISSION_RESULT);
+        final String[] permissionsToRequest = new String[] { writePermission, readPermission };
+        requestPermissions(mActivity, permissionsToRequest, REQUEST_WRITE_PERMISSION_RESULT);
       } else {
-        Log.d(TAG, "WRITE permission granted");
+        Log.i(TAG, "Permissions granted: WRITE_EXTERNAL_STORAGE, READ_EXTERNAL_STORAGE");
         permissions.put("WRITE", true);
+        permissions.put("READ", true);
       }
     }
-    if (ContextCompat.checkSelfPermission(mContext, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED
-            || ContextCompat.checkSelfPermission(mContext, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+
+    // Irrespective of Android version, the app needs permissions to CAMERA and RECORD_AUDIO
+    final String cameraPermission = Manifest.permission.CAMERA;
+    final String audioPermission = Manifest.permission.RECORD_AUDIO;
+    final int cameraPermissionStatus = ContextCompat.checkSelfPermission(mContext, cameraPermission);
+    final int audioPermissionStatus = ContextCompat.checkSelfPermission(mContext, audioPermission);
+    if (cameraPermissionStatus != PackageManager.PERMISSION_GRANTED || audioPermissionStatus != PackageManager.PERMISSION_GRANTED) {
       if (shouldShowRequestPermissionRationale(mActivity, Manifest.permission.CAMERA)) {
-        Toast.makeText(mContext, "Camera permission is required to record videos", Toast.LENGTH_SHORT).show();
+        showToast("Camera permission is required to record videos");
       }
       if (shouldShowRequestPermissionRationale(mActivity, Manifest.permission.RECORD_AUDIO)) {
-        Toast.makeText(mContext, "Microphone permission is required to record videos", Toast.LENGTH_SHORT).show();
+        showToast("Microphone permission is required to record videos");
       }
-      requestPermissions(mActivity, new String[] { Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO }, REQUEST_CAMERA_AUDIO_PERMISSION_RESULT);
+      requestPermissions(mActivity, new String[] { cameraPermission, audioPermission }, REQUEST_CAMERA_AUDIO_PERMISSION_RESULT);
     } else {
-      Log.d(TAG, "CAMERA permission granted");
-      Log.d(TAG, "MIC permission granted");
       permissions.put("CAMERA", true);
       permissions.put("MIC", true);
     }
+    Log.i(TAG, "Permission check complete.");
   }
 
-  private boolean shouldStartRecording() {
-    boolean result;
+  private boolean hasRecordingPermissions() {
     if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.P) {
-      result = Boolean.TRUE.equals(permissions.get("WRITE"))
+      return Boolean.TRUE.equals(permissions.get("WRITE"))
+              && Boolean.TRUE.equals(permissions.get("READ"))
               && Boolean.TRUE.equals(permissions.get("MIC"))
               && Boolean.TRUE.equals(permissions.get("CAMERA"));
     } else {
-      result = Boolean.TRUE.equals(permissions.get("MIC"))
+      return Boolean.TRUE.equals(permissions.get("MIC"))
               && Boolean.TRUE.equals(permissions.get("CAMERA"));
     }
-    if (!Settings.canDrawOverlays(mContext)) {
-      result = false;
-      Toast.makeText(mContext, "Enable draw over other apps for LightBackgroundVideoRecorder", Toast.LENGTH_SHORT).show();
-      Intent intent = new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + mContext.getPackageName()));
-      mActivity.startActivity(intent);
-    }
-    return result;
   }
 
   @Override
@@ -216,8 +220,17 @@ public class FlutterBackgroundVideoRecorderPlugin extends BroadcastReceiver impl
         } else {
           this.permissions.put("WRITE", true);
         }
+        if (grantResults[1] != PackageManager.PERMISSION_GRANTED) {
+          Toast.makeText(mContext, "Read permission denied by user", Toast.LENGTH_SHORT).show();
+        } else {
+          this.permissions.put("READ", true);
+        }
     }
     return true;
+  }
+
+  private void showToast(@NonNull String content) {
+    Toast.makeText(mContext, content, Toast.LENGTH_SHORT).show();
   }
 
   @Override
