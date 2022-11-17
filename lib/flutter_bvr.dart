@@ -1,9 +1,9 @@
-
 import 'flutter_bvr_platform_interface.dart';
 
 class FlutterBackgroundVideoRecorder {
   Future<bool?> startVideoRecording() {
-    return FlutterBackgroundVideoRecorderPlatform.instance.startVideoRecording();
+    return FlutterBackgroundVideoRecorderPlatform.instance
+        .startVideoRecording();
   }
 
   Future<String?> stopVideoRecording() {
@@ -15,6 +15,7 @@ class FlutterBackgroundVideoRecorder {
   }
 
   Future<int?> getVideoRecordingStatus() {
-    return FlutterBackgroundVideoRecorderPlatform.instance.getVideoRecordingStatus();
+    return FlutterBackgroundVideoRecorderPlatform.instance
+        .getVideoRecordingStatus();
   }
 }

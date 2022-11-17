@@ -2,7 +2,8 @@ import 'package:plugin_platform_interface/plugin_platform_interface.dart';
 
 import 'flutter_bvr_channel.dart';
 
-abstract class FlutterBackgroundVideoRecorderPlatform extends PlatformInterface {
+abstract class FlutterBackgroundVideoRecorderPlatform
+    extends PlatformInterface {
   /// Constructs a FlutterBackgroundVideoRecorderPlatform.
   FlutterBackgroundVideoRecorderPlatform() : super(token: _token);
 
@@ -33,7 +34,8 @@ abstract class FlutterBackgroundVideoRecorderPlatform extends PlatformInterface 
       - 4: An exception has occurred in the recording service
   */
   Future<int?> getVideoRecordingStatus() {
-    throw UnimplementedError('getVideoRecordingStatus() has not been implemented.');
+    throw UnimplementedError(
+        'getVideoRecordingStatus() has not been implemented.');
   }
 
   /*
