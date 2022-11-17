@@ -9,6 +9,7 @@ import io.flutter.embedding.engine.plugins.activity.ActivityAware;
 
 import android.Manifest;
 import android.app.Activity;
+import android.app.ActivityManager;
 import android.content.BroadcastReceiver;
 import android.content.ComponentName;
 import android.content.Context;
@@ -72,14 +73,16 @@ public class FlutterBackgroundVideoRecorderPlugin extends BroadcastReceiver impl
       VideoRecorderService.LocalBinder binder = (VideoRecorderService.LocalBinder) service;
       mVideoRecordingService = binder.getServerInstance();
       boolean isRecording = mVideoRecordingService.getRecordingStatus();
-      if (!isRecording)
+      if (!isRecording) {
         mVideoRecordingService.startVideoRecording();
-      else
+      } else {
+        mRecordingStatus = STATUS_RECORDING;
         Toast.makeText(
                 mVideoRecordingService.getApplicationContext(),
                 "Recording already in progress.",
                 Toast.LENGTH_SHORT
         ).show();
+      }
     }
 
     @Override
@@ -90,6 +93,7 @@ public class FlutterBackgroundVideoRecorderPlugin extends BroadcastReceiver impl
 
   @Override
   public void onAttachedToEngine(@NonNull FlutterPluginBinding flutterPluginBinding) {
+    Log.i(TAG, "Plugin attached to engine");
     mContext = flutterPluginBinding.getApplicationContext();
 
     channel = new MethodChannel(flutterPluginBinding.getBinaryMessenger(), "flutter_background_video_recorder");
@@ -114,7 +118,7 @@ public class FlutterBackgroundVideoRecorderPlugin extends BroadcastReceiver impl
           checkPermissions();
           if (hasRecordingPermissions()) {
             Intent backgroundServiceStartIntent = new Intent(mContext, VideoRecorderService.class);
-            mActivity.startService(backgroundServiceStartIntent);
+            mActivity.startForegroundService(backgroundServiceStartIntent);
             mActivity.bindService(backgroundServiceStartIntent, mConnection, BIND_AUTO_CREATE);
           } else {
             Log.i(TAG, "Permissions not satisfied.");
@@ -143,8 +147,11 @@ public class FlutterBackgroundVideoRecorderPlugin extends BroadcastReceiver impl
 
   @Override
   public void onDetachedFromEngine(@NonNull FlutterPluginBinding binding) {
+    Log.i(TAG, "Plugin detached from engine");
     channel.setMethodCallHandler(null);
     eventChannel.setStreamHandler(null);
+
+    mContext.unregisterReceiver(this);
   }
 
   private void checkPermissions() {
@@ -236,23 +243,39 @@ public class FlutterBackgroundVideoRecorderPlugin extends BroadcastReceiver impl
 
   @Override
   public void onAttachedToActivity(@NonNull ActivityPluginBinding binding) {
+    Log.i(TAG, "Plugin attached to activity");
     mActivity = binding.getActivity();
     binding.addRequestPermissionsResultListener(this);
+
+    if (isServiceRunning()) {
+      Intent backgroundServiceBindIntent = new Intent(mContext, VideoRecorderService.class);
+      mActivity.bindService(backgroundServiceBindIntent, mConnection, BIND_AUTO_CREATE);
+    }
   }
 
   @Override
   public void onDetachedFromActivityForConfigChanges() {
+    Log.i(TAG, "Plugin detached from activity for config changes");
+    mActivity.unbindService(mConnection);
     mActivity = null;
   }
 
   @Override
   public void onReattachedToActivityForConfigChanges(@NonNull ActivityPluginBinding binding) {
+    Log.i(TAG, "Plugin reattached to activity for config changes");
     mActivity = binding.getActivity();
     binding.addRequestPermissionsResultListener(this);
+
+    if (isServiceRunning()) {
+      Intent backgroundServiceBindIntent = new Intent(mContext, VideoRecorderService.class);
+      mActivity.bindService(backgroundServiceBindIntent, mConnection, BIND_AUTO_CREATE);
+    }
   }
 
   @Override
   public void onDetachedFromActivity() {
+    Log.i(TAG, "Plugin detached from activity");
+    mActivity.unbindService(mConnection);
     mActivity = null;
   }
 
@@ -293,5 +316,16 @@ public class FlutterBackgroundVideoRecorderPlugin extends BroadcastReceiver impl
       default:
         Toast.makeText(mContext, "Illegal broadcast received", Toast.LENGTH_SHORT).show();
     }
+  }
+
+  @SuppressWarnings("deprecation")
+  private boolean isServiceRunning() {
+    ActivityManager manager = (ActivityManager) mContext.getSystemService(Context.ACTIVITY_SERVICE);
+    for (ActivityManager.RunningServiceInfo service : manager.getRunningServices(Integer.MAX_VALUE)) {
+      if (VideoRecorderService.class.getName().equals(service.service.getClassName())) {
+        return true;
+      }
+    }
+    return false;
   }
 }
