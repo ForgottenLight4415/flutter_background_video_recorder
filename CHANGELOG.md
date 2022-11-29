@@ -1,3 +1,6 @@
+## 0.0.6
+* Updated documentation and README
+
 ## 0.0.5
 
 * Fixed an issue which caused the plugin to crash when app is closed causing the recording to continue until force stopped.
