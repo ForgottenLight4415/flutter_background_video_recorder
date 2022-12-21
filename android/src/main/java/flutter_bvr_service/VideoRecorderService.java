@@ -39,12 +39,14 @@ import java.util.List;
 import java.util.Locale;
 
 public class VideoRecorderService extends Service {
+    // Class constants
     public static final int SERVICE_ID = 4415;
     public static final String TAG = "LightRecordingService";
     public static final String NOTIFICATION_CHANNEL_ID = "LightRecordingServiceNotification";
 
     private WindowManager mWindowManager;
 
+    // Handles the camera events
     private CameraDevice mCameraDevice;
     private final CameraDevice.StateCallback mCameraDeviceStateCallback
             = new CameraDevice.StateCallback() {
@@ -75,12 +77,18 @@ public class VideoRecorderService extends Service {
         }
     };
 
+    // Camera variables
     private String mCameraId;
     private Size mVideoSize;
-    private MediaRecorder mMediaRecorder;
     private int mTotalRotation;
+    private String mCameraFacing = "Rear Camera";
     private CaptureRequest.Builder mCaptureRequestBuilder;
 
+    // Media recorder variables
+    private MediaRecorder mMediaRecorder;
+
+    // Output file/folder variables
+    private String mVideoFolderName;
     private File mVideoFolder;
     private String mVideoFileName;
 
@@ -97,16 +105,8 @@ public class VideoRecorderService extends Service {
     @Override
     public void onCreate() {
         super.onCreate();
-        /*
-            * Initialize resources and variables for recording.
-            * Check existence of target video folder, create if not exists.
-            * Create MediaRecorder object
-            * Setup camera
-        */
-        createVideoFolder();
         mMediaRecorder = new MediaRecorder();
         mWindowManager = (WindowManager) this.getSystemService(Context.WINDOW_SERVICE);
-        setupCamera();
     }
 
     @Override
@@ -117,6 +117,11 @@ public class VideoRecorderService extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
+        mVideoFolderName = intent.getStringExtra("DirectoryName");
+        mCameraFacing = intent.getStringExtra("CameraFacing");
+
+        String notificationTitle = intent.getStringExtra("NotificationTitle");
+        String notificationText = intent.getStringExtra("NotificationText");
         NotificationChannel notificationChannel = new NotificationChannel(
                 NOTIFICATION_CHANNEL_ID,
                 "RecordingServiceNotification",
@@ -124,16 +129,22 @@ public class VideoRecorderService extends Service {
         );
         Notification notification
                 = new Notification.Builder(getApplicationContext(), NOTIFICATION_CHANNEL_ID)
-                .setContentTitle("Light Background Video Recorder")
-                .setContentText("Video recording is in progress")
+                .setContentTitle(notificationTitle)
+                .setContentText(notificationText)
                 .setSmallIcon(android.R.drawable.presence_video_online)
                 .setOngoing(true)
                 .build();
         NotificationManager notificationManager = getSystemService(NotificationManager.class);
         notificationManager.createNotificationChannel(notificationChannel);
         startForeground(SERVICE_ID, notification);
+        setupCameraAndTargetFolder();
         Log.i(TAG, "Recording service started in foreground");
         return super.onStartCommand(intent, flags, startId);
+    }
+
+    public void setupCameraAndTargetFolder() {
+        createVideoFolder();
+        setupCamera();
     }
 
     public void startVideoRecording() {
@@ -177,10 +188,16 @@ public class VideoRecorderService extends Service {
 
     private void setupCamera() {
         CameraManager cameraManager = (CameraManager) getSystemService(Context.CAMERA_SERVICE);
+        int lensFacing;
+        if (mCameraFacing.equals("Front Camera")) {
+            lensFacing = CameraCharacteristics.LENS_FACING_FRONT;
+        } else {
+            lensFacing = CameraCharacteristics.LENS_FACING_BACK;
+        }
         try {
             for (String cameraId: cameraManager.getCameraIdList()) {
                 CameraCharacteristics cameraCharacteristics = cameraManager.getCameraCharacteristics(cameraId);
-                if (cameraCharacteristics.get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_BACK) {
+                if (cameraCharacteristics.get(CameraCharacteristics.LENS_FACING) == lensFacing) {
                     StreamConfigurationMap map = cameraCharacteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
                     int deviceOrientation = mWindowManager.getDefaultDisplay().getRotation();
                     mTotalRotation = sensorToDeviceRotation(cameraCharacteristics, deviceOrientation);
@@ -272,7 +289,7 @@ public class VideoRecorderService extends Service {
 
     private void createVideoFolder() {
         File videoFile = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES);
-        mVideoFolder = new File(videoFile, "LightBackgroundRecorder");
+        mVideoFolder = new File(videoFile, mVideoFolderName);
         if (!mVideoFolder.exists()) {
             if (!mVideoFolder.mkdirs()) {
                 Log.e(TAG, "Failed to create target folder.");
@@ -292,7 +309,8 @@ public class VideoRecorderService extends Service {
     private void createVideoFile() {
         try {
             String timeStamp = new SimpleDateFormat("yyyy-MM-dd_HH-mm-ss", Locale.US).format(new Date());
-            String prepend = "LightBackgroundRecording_" + timeStamp;
+            String fileBaseName = mVideoFolderName.replace(" ", "");
+            String prepend = fileBaseName + "_" + timeStamp;
             File videoFile = File.createTempFile(prepend, ".mp4", mVideoFolder);
             mVideoFileName = videoFile.getAbsolutePath();
         } catch (IOException e) {

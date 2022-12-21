@@ -62,10 +62,12 @@ public class FlutterBackgroundVideoRecorderPlugin extends BroadcastReceiver impl
 
   private Context mContext;
   private Activity mActivity;
+  private MethodCall configurationCall;
   private final Map<String, Boolean> permissions = new HashMap<>();
 
   private int mRecordingStatus = STATUS_STOPPED;
 
+  // Handles service connection events
   private final ServiceConnection mConnection = new ServiceConnection() {
     @Override
     public void onServiceConnected(ComponentName className, IBinder service) {
@@ -117,12 +119,10 @@ public class FlutterBackgroundVideoRecorderPlugin extends BroadcastReceiver impl
         if (mRecordingStatus == STATUS_STOPPED) {
           checkPermissions();
           if (hasRecordingPermissions()) {
-            Intent backgroundServiceStartIntent = new Intent(mContext, VideoRecorderService.class);
-            mActivity.startForegroundService(backgroundServiceStartIntent);
-            mActivity.bindService(backgroundServiceStartIntent, mConnection, BIND_AUTO_CREATE);
+            startVideoRecordingService(call);
           } else {
+            configurationCall = call;
             Log.i(TAG, "Permissions not satisfied.");
-            checkPermissions();
           }
           result.success(true);
         } else {
@@ -136,13 +136,32 @@ public class FlutterBackgroundVideoRecorderPlugin extends BroadcastReceiver impl
           showToast("File saved: " + mVideoFileName);
           result.success(mVideoFileName);
         } else {
-          result.error(Integer.toString(11), "Recording stopped", "Recording already stopped");
+          result.error(
+                  Integer.toString(11),
+                  "Recording stopped",
+                  "Recording already stopped"
+          );
         }
         break;
       default:
         result.notImplemented();
         break;
     }
+  }
+
+  private void startVideoRecordingService(MethodCall call) {
+    String videoFolderName = call.argument("videoFolderName");
+    // Can take values "Rear camera" and "Front camera"
+    String cameraFacing = call.argument("cameraFacing");
+    String notificationTitle = call.argument("notificationTitle");
+    String notificationText = call.argument("notificationText");
+    Intent backgroundServiceStartIntent = new Intent(mContext, VideoRecorderService.class);
+    backgroundServiceStartIntent.putExtra("DirectoryName", videoFolderName);
+    backgroundServiceStartIntent.putExtra("CameraFacing", cameraFacing);
+    backgroundServiceStartIntent.putExtra("NotificationTitle", notificationTitle);
+    backgroundServiceStartIntent.putExtra("NotificationText", notificationText);
+    mActivity.startForegroundService(backgroundServiceStartIntent);
+    mActivity.bindService(backgroundServiceStartIntent, mConnection, BIND_AUTO_CREATE);
   }
 
   @Override
@@ -209,6 +228,9 @@ public class FlutterBackgroundVideoRecorderPlugin extends BroadcastReceiver impl
 
   @Override
   public boolean onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
+    if (grantResults.length == 0) {
+      return false;
+    }
     switch (requestCode) {
       case REQUEST_CAMERA_AUDIO_PERMISSION_RESULT:
         if (grantResults[0] != PackageManager.PERMISSION_GRANTED) {
@@ -233,6 +255,10 @@ public class FlutterBackgroundVideoRecorderPlugin extends BroadcastReceiver impl
         } else {
           this.permissions.put("READ", true);
         }
+    }
+    if (hasRecordingPermissions()) {
+      startVideoRecordingService(configurationCall);
+      configurationCall = null;
     }
     return true;
   }

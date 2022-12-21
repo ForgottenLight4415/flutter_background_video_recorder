@@ -2,9 +2,16 @@ import 'flutter_bvr_platform_interface.dart';
 
 class FlutterBackgroundVideoRecorder {
   // Start recording service and record video
-  Future<bool?> startVideoRecording() {
-    return FlutterBackgroundVideoRecorderPlatform.instance
-        .startVideoRecording();
+  Future<bool?> startVideoRecording(
+      {required String folderName,
+      required CameraFacing cameraFacing,
+      required String notificationTitle,
+      required String notificationText}) {
+    return FlutterBackgroundVideoRecorderPlatform.instance.startVideoRecording(
+        folderName: folderName,
+        cameraFacing: cameraFacing,
+        notificationTitle: notificationTitle,
+        notificationText: notificationText);
   }
 
   // Stop video recording, release resources and stop service

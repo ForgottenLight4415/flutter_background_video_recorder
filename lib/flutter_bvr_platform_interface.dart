@@ -2,6 +2,8 @@ import 'package:plugin_platform_interface/plugin_platform_interface.dart';
 
 import 'flutter_bvr_channel.dart';
 
+enum CameraFacing { rearCamera, frontCamera }
+
 abstract class FlutterBackgroundVideoRecorderPlatform
     extends PlatformInterface {
   /// Constructs a FlutterBackgroundVideoRecorderPlatform.
@@ -24,15 +26,15 @@ abstract class FlutterBackgroundVideoRecorderPlatform
     _instance = instance;
   }
 
-  // Get current state of video recorder
-  // Use to query the state for the first time after starting the service
-  // Once service starts, recording events can be called using [recorderState] getter
-  // * States are denoted by integer numbers
-  //    - -1: Recorder service not initialized
-  //    - 1: Recording has started
-  //    - 2: Recording has stopped
-  //    - 3: Recorder is being initialized and about to start recording
-  //    - 4: An exception has occurred in the recording service
+  /// Get current state of video recorder
+  /// Use to query the state for the first time after starting the service
+  /// Once service starts, recording events can be called using [recorderState] getter
+  /// * States are denoted by integer numbers
+  ///   - -1: Recorder service not initialized
+  ///   - 1: Recording has started
+  ///   - 2: Recording has stopped
+  ///   - 3: Recorder is being initialized and about to start recording
+  ///   - 4: An exception has occurred in the recording service
   Future<int?> getVideoRecordingStatus() {
     throw UnimplementedError(
         'getVideoRecordingStatus() has not been implemented.');
@@ -49,8 +51,13 @@ abstract class FlutterBackgroundVideoRecorderPlatform
     throw UnimplementedError('recorderState has not been implemented.');
   }
 
-  // Starts service and records video
-  Future<bool?> startVideoRecording() {
+  /// Starts service and records video
+  /// Must pass folder name, camera facing direction, notification title and notification text
+  Future<bool?> startVideoRecording(
+      {required String folderName,
+      required CameraFacing cameraFacing,
+      required String notificationTitle,
+      required String notificationText}) {
     throw UnimplementedError('startVideoRecording() has not been implemented.');
   }
 

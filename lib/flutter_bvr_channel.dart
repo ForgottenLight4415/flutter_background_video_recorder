@@ -21,8 +21,22 @@ class FlutterBVRChannel extends FlutterBackgroundVideoRecorderPlatform {
   }
 
   @override
-  Future<bool?> startVideoRecording() async {
-    return await _methodChannel.invokeMethod<bool?>("startVideoRecording");
+  Future<bool?> startVideoRecording(
+      {required String folderName,
+      required CameraFacing cameraFacing,
+      required String notificationTitle,
+      required String notificationText}) async {
+    return await _methodChannel.invokeMethod<bool?>(
+      "startVideoRecording",
+      {
+        "videoFolderName": folderName,
+        "cameraFacing": cameraFacing == CameraFacing.frontCamera
+            ? "Front Camera"
+            : "Rear Camera",
+        "notificationTitle": notificationTitle,
+        "notificationText": notificationText
+      },
+    );
   }
 
   @override
