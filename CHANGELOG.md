@@ -1,3 +1,7 @@
+## 0.0.9
+* Updated documentation and example
+* Updated dart code to implement `showToast` property
+
 ## 0.0.8
 * You can now hide the toasts by setting the `showToast` property to false when calling `startVideoRecording()`
 

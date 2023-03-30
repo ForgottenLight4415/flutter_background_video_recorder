@@ -6,12 +6,15 @@ class FlutterBackgroundVideoRecorder {
       {required String folderName,
       required CameraFacing cameraFacing,
       required String notificationTitle,
-      required String notificationText}) {
+      required String notificationText,
+      bool showToast = false}) {
     return FlutterBackgroundVideoRecorderPlatform.instance.startVideoRecording(
         folderName: folderName,
         cameraFacing: cameraFacing,
         notificationTitle: notificationTitle,
-        notificationText: notificationText);
+        notificationText: notificationText,
+        showToast: showToast
+    );
   }
 
   // Stop video recording, release resources and stop service
@@ -38,7 +41,6 @@ class FlutterBackgroundVideoRecorder {
   //    - 3: Recorder is being initialized and about to start recording
   //    - 4: An exception has occurred in the recording service
   Future<int?> getVideoRecordingStatus() {
-    return FlutterBackgroundVideoRecorderPlatform.instance
-        .getRecordingStatus();
+    return FlutterBackgroundVideoRecorderPlatform.instance.getRecordingStatus();
   }
 }

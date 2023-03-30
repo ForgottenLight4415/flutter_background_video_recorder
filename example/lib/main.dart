@@ -137,7 +137,9 @@ class _MyAppState extends State<MyApp> {
                             folderName: "Example Recorder",
                             cameraFacing: CameraFacing.frontCamera,
                             notificationTitle: "Example Notification Title",
-                            notificationText: "Example Notification Text");
+                            notificationText: "Example Notification Text",
+                            showToast: false
+                    );
                     setState(() {});
                   } else if (!_isRecording && _recorderBusy) {
                     return;

@@ -7,6 +7,7 @@ class FlutterBVRChannel extends FlutterBackgroundVideoRecorderPlatform {
   /// The method channel used to interact with the native platform.
   static const MethodChannel _methodChannel =
       MethodChannel('flutter_background_video_recorder');
+
   /// The event channel used to interact with the native platform.
   static const EventChannel _eventChannel =
       EventChannel('flutter_background_video_recorder_event');
@@ -31,7 +32,7 @@ class FlutterBVRChannel extends FlutterBackgroundVideoRecorderPlatform {
       required CameraFacing cameraFacing,
       required String notificationTitle,
       required String notificationText,
-      bool showToast = false}) async {
+      required bool showToast}) async {
     return await _methodChannel.invokeMethod<bool?>(
       "startVideoRecording",
       {

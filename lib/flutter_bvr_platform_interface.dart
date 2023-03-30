@@ -57,7 +57,8 @@ abstract class FlutterBackgroundVideoRecorderPlatform
       {required String folderName,
       required CameraFacing cameraFacing,
       required String notificationTitle,
-      required String notificationText}) {
+      required String notificationText,
+      required bool showToast}) {
     throw UnimplementedError('startVideoRecording() has not been implemented.');
   }
 
