@@ -28,7 +28,7 @@
         </activity>
 
         <service
-            android:name="flutter_bvr_service.VideoRecorderService"
+            android:name="services.VideoRecorderService"
             android:enabled="true"
             android:exported="false"
             android:foregroundServiceType="camera|microphone" />

@@ -7,25 +7,31 @@ class FlutterBVRChannel extends FlutterBackgroundVideoRecorderPlatform {
   /// The method channel used to interact with the native platform.
   static const MethodChannel _methodChannel =
       MethodChannel('flutter_background_video_recorder');
+  /// The event channel used to interact with the native platform.
   static const EventChannel _eventChannel =
       EventChannel('flutter_background_video_recorder_event');
 
+  /// Method used to get the most recent status of the video recorder
   @override
-  Future<int> getVideoRecordingStatus() async {
+  Future<int> getRecordingStatus() async {
     return await _methodChannel.invokeMethod<int>("getRecordingStatus") ?? -1;
   }
 
+  /// Stream that transmits the current status of video recorder from
+  /// native platform to event channel
   @override
   Stream<int> get recorderState {
     return _eventChannel.receiveBroadcastStream().map((value) => value as int);
   }
 
+  /// Method to start recording video
   @override
   Future<bool?> startVideoRecording(
       {required String folderName,
       required CameraFacing cameraFacing,
       required String notificationTitle,
-      required String notificationText}) async {
+      required String notificationText,
+      bool showToast = false}) async {
     return await _methodChannel.invokeMethod<bool?>(
       "startVideoRecording",
       {
@@ -34,7 +40,8 @@ class FlutterBVRChannel extends FlutterBackgroundVideoRecorderPlatform {
             ? "Front Camera"
             : "Rear Camera",
         "notificationTitle": notificationTitle,
-        "notificationText": notificationText
+        "notificationText": notificationText,
+        "showToast": showToast ? 'true' : 'false'
       },
     );
   }

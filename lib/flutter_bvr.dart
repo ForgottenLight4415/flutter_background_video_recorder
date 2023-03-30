@@ -39,6 +39,6 @@ class FlutterBackgroundVideoRecorder {
   //    - 4: An exception has occurred in the recording service
   Future<int?> getVideoRecordingStatus() {
     return FlutterBackgroundVideoRecorderPlatform.instance
-        .getVideoRecordingStatus();
+        .getRecordingStatus();
   }
 }

@@ -1,4 +1,4 @@
-package com.lightsoftware.flutter_background_video_recorder.flutter_background_video_recorder;
+package com.lightsoftware.flutter_background_video_recorder.plugin;
 
 import static android.content.Context.BIND_AUTO_CREATE;
 
@@ -27,6 +27,7 @@ import androidx.core.content.ContextCompat;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Objects;
 
 import io.flutter.embedding.engine.plugins.FlutterPlugin;
 import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding;
@@ -37,7 +38,7 @@ import io.flutter.plugin.common.MethodChannel.MethodCallHandler;
 import io.flutter.plugin.common.MethodChannel.Result;
 import io.flutter.plugin.common.PluginRegistry;
 
-import flutter_bvr_service.VideoRecorderService;
+import services.VideoRecorderService;
 
 /** FlutterBackgroundVideoRecorderPlugin */
 public class FlutterBackgroundVideoRecorderPlugin extends BroadcastReceiver implements FlutterPlugin, MethodCallHandler, ActivityAware, PluginRegistry.RequestPermissionsResultListener, EventChannel.StreamHandler {
@@ -67,15 +68,16 @@ public class FlutterBackgroundVideoRecorderPlugin extends BroadcastReceiver impl
 
   private int mRecordingStatus = STATUS_STOPPED;
 
+  private boolean showInfoToast = true;
+
   // Handles service connection events
   private final ServiceConnection mConnection = new ServiceConnection() {
     @Override
     public void onServiceConnected(ComponentName className, IBinder service) {
-      Log.i(TAG, "Connection to service established.");
+      Log.i(TAG, "Connected to video recording service.");
       VideoRecorderService.LocalBinder binder = (VideoRecorderService.LocalBinder) service;
       mVideoRecordingService = binder.getServerInstance();
-      boolean isRecording = mVideoRecordingService.getRecordingStatus();
-      if (!isRecording) {
+      if (!mVideoRecordingService.getRecordingStatus()) {
         mVideoRecordingService.startVideoRecording();
       } else {
         mRecordingStatus = STATUS_RECORDING;
@@ -117,12 +119,12 @@ public class FlutterBackgroundVideoRecorderPlugin extends BroadcastReceiver impl
         break;
       case "startVideoRecording":
         if (mRecordingStatus == STATUS_STOPPED) {
-          checkPermissions();
           if (hasRecordingPermissions()) {
             startVideoRecordingService(call);
           } else {
-            configurationCall = call;
             Log.i(TAG, "Permissions not satisfied.");
+            configurationCall = call;
+            checkPermissions();
           }
           result.success(true);
         } else {
@@ -133,7 +135,9 @@ public class FlutterBackgroundVideoRecorderPlugin extends BroadcastReceiver impl
         if (mRecordingStatus == STATUS_RECORDING) {
           String mVideoFileName = mVideoRecordingService.stopVideoRecording();
           mActivity.unbindService(mConnection);
-          showToast("File saved: " + mVideoFileName);
+          if (showInfoToast) {
+            showToast("File saved: " + mVideoFileName);
+          }
           result.success(mVideoFileName);
         } else {
           result.error(
@@ -155,6 +159,7 @@ public class FlutterBackgroundVideoRecorderPlugin extends BroadcastReceiver impl
     String cameraFacing = call.argument("cameraFacing");
     String notificationTitle = call.argument("notificationTitle");
     String notificationText = call.argument("notificationText");
+    showInfoToast = Objects.equals(call.argument("showToast"), "true");
     Intent backgroundServiceStartIntent = new Intent(mContext, VideoRecorderService.class);
     backgroundServiceStartIntent.putExtra("DirectoryName", videoFolderName);
     backgroundServiceStartIntent.putExtra("CameraFacing", cameraFacing);
@@ -169,7 +174,6 @@ public class FlutterBackgroundVideoRecorderPlugin extends BroadcastReceiver impl
     Log.i(TAG, "Plugin detached from engine");
     channel.setMethodCallHandler(null);
     eventChannel.setStreamHandler(null);
-
     mContext.unregisterReceiver(this);
   }
 
@@ -319,7 +323,9 @@ public class FlutterBackgroundVideoRecorderPlugin extends BroadcastReceiver impl
   public void onReceive(Context context, Intent intent) {
     String message = intent.getStringExtra("msg");
     String code = intent.getStringExtra("code");
-    Toast.makeText(mContext, message, Toast.LENGTH_SHORT).show();
+    if (showInfoToast) {
+      Toast.makeText(mContext, message, Toast.LENGTH_SHORT).show();
+    }
     Log.i(TAG, "Received code " + code + " with message: " + message);
     switch (code) {
       case "RECORDING":

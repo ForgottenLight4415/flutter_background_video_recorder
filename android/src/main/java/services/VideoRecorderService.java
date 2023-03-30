@@ -1,4 +1,4 @@
-package flutter_bvr_service;
+package services;
 
 import android.app.Notification;
 import android.app.NotificationChannel;
@@ -26,7 +26,7 @@ import android.widget.Toast;
 
 import androidx.annotation.NonNull;
 
-import com.lightsoftware.flutter_background_video_recorder.flutter_background_video_recorder.FlutterBackgroundVideoRecorderPlugin;
+import com.lightsoftware.flutter_background_video_recorder.plugin.FlutterBackgroundVideoRecorderPlugin;
 
 import java.io.File;
 import java.io.IOException;

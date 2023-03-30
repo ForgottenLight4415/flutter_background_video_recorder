@@ -35,7 +35,7 @@ abstract class FlutterBackgroundVideoRecorderPlatform
   ///   - 2: Recording has stopped
   ///   - 3: Recorder is being initialized and about to start recording
   ///   - 4: An exception has occurred in the recording service
-  Future<int?> getVideoRecordingStatus() {
+  Future<int?> getRecordingStatus() {
     throw UnimplementedError(
         'getVideoRecordingStatus() has not been implemented.');
   }

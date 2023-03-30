@@ -1,5 +1,5 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-  package="com.lightsoftware.flutter_background_video_recorder.flutter_background_video_recorder">
+  package="com.lightsoftware.flutter_background_video_recorder.plugin">
 
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.CAMERA" />

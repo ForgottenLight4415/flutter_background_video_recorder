@@ -1,3 +1,6 @@
+## 0.0.8
+* You can now hide the toasts by setting the `showToast` property to false when calling `startVideoRecording()`
+
 ## 0.0.7
 * Added support for front camera
 
