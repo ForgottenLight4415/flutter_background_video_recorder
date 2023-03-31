@@ -13,8 +13,7 @@ class FlutterBackgroundVideoRecorder {
         cameraFacing: cameraFacing,
         notificationTitle: notificationTitle,
         notificationText: notificationText,
-        showToast: showToast
-    );
+        showToast: showToast);
   }
 
   // Stop video recording, release resources and stop service
