@@ -1,3 +1,6 @@
+## 0.0.9+1
+* Fixed an issue that caused the plugin to not start recording when permissions are granted
+
 ## 0.0.9
 * Updated documentation and example
 * Updated dart code to implement `showToast` property

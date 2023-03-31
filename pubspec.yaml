@@ -1,6 +1,6 @@
 name: flutter_background_video_recorder
 description: A flutter plugin for Android to record videos in the background. Works even when the screen is locked or turned off.
-version: 0.0.9
+version: 0.0.9+1
 repository: https://github.com/ForgottenLight4415/flutter_background_video_recorder
 
 environment:
