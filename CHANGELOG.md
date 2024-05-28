@@ -1,3 +1,6 @@
+## 1.0.0+2
+* Added support for Android 14
+
 ## 0.0.9+1
 * Fixed an issue that caused the plugin to not start recording when permissions are granted
 
