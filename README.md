@@ -7,7 +7,7 @@ A flutter plugin for Android to record videos in the background.
 This simple plugin allows you to record videos in your Android app while the app is in background or the screen is locked or turned off.
 
 ## Supported features (Android)
-* Supported on Android API 26 (Oreo) and later
+* Supported on Android API 28 (Pie) and later
 * Video + audio recording in full HD (1080p)
 * Recording continues even if the app is in the background or closed
 * Recording continues even with the screen off or locked

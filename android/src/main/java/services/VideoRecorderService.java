@@ -6,6 +6,7 @@ import android.app.NotificationManager;
 import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.ServiceInfo;
 import android.hardware.camera2.CameraAccessException;
 import android.hardware.camera2.CameraCaptureSession;
 import android.hardware.camera2.CameraCharacteristics;
@@ -13,13 +14,16 @@ import android.hardware.camera2.CameraDevice;
 import android.hardware.camera2.CameraManager;
 import android.hardware.camera2.CaptureRequest;
 import android.hardware.camera2.params.StreamConfigurationMap;
+import android.hardware.display.DisplayManager;
 import android.media.MediaRecorder;
 import android.os.Binder;
+import android.os.Build;
 import android.os.Environment;
 import android.os.IBinder;
 import android.util.Log;
 import android.util.Size;
 import android.util.SparseIntArray;
+import android.view.Display;
 import android.view.Surface;
 import android.view.WindowManager;
 import android.widget.Toast;
@@ -62,6 +66,7 @@ public class VideoRecorderService extends Service {
             broadcastIntent.putExtra("msg", "Recording started");
             broadcastIntent.putExtra("code", "RECORDING");
             sendBroadcast(broadcastIntent);
+            Log.i(TAG, "Broadcast sent!");
         }
 
         @Override
@@ -105,7 +110,11 @@ public class VideoRecorderService extends Service {
     @Override
     public void onCreate() {
         super.onCreate();
-        mMediaRecorder = new MediaRecorder();
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            mMediaRecorder = new MediaRecorder(getApplicationContext());
+        } else {
+            mMediaRecorder = new MediaRecorder();
+        }
         mWindowManager = (WindowManager) this.getSystemService(Context.WINDOW_SERVICE);
     }
 
@@ -136,7 +145,11 @@ public class VideoRecorderService extends Service {
                 .build();
         NotificationManager notificationManager = getSystemService(NotificationManager.class);
         notificationManager.createNotificationChannel(notificationChannel);
-        startForeground(SERVICE_ID, notification);
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+            startForeground(SERVICE_ID, notification);
+        } else {
+            startForeground(SERVICE_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE);
+        }
         setupCameraAndTargetFolder();
         Log.i(TAG, "Recording service started in foreground");
         return super.onStartCommand(intent, flags, startId);
@@ -173,7 +186,7 @@ public class VideoRecorderService extends Service {
         broadcastIntent.putExtra("msg", "Recording stopped.");
         broadcastIntent.putExtra("code", "STOPPED");
         sendBroadcast(broadcastIntent);
-        stopForeground(true);
+        stopForeground(STOP_FOREGROUND_REMOVE);
         stopSelf();
         return mVideoFileName;
     }
@@ -197,19 +210,35 @@ public class VideoRecorderService extends Service {
         try {
             for (String cameraId: cameraManager.getCameraIdList()) {
                 CameraCharacteristics cameraCharacteristics = cameraManager.getCameraCharacteristics(cameraId);
-                if (cameraCharacteristics.get(CameraCharacteristics.LENS_FACING) == lensFacing) {
-                    StreamConfigurationMap map = cameraCharacteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
-                    int deviceOrientation = mWindowManager.getDefaultDisplay().getRotation();
-                    mTotalRotation = sensorToDeviceRotation(cameraCharacteristics, deviceOrientation);
-                    mVideoSize = chooseOptimalSize(map.getOutputSizes(MediaRecorder.class));
-                    mCameraId = cameraId;
-                    return;
+                if (cameraCharacteristics.get(CameraCharacteristics.LENS_FACING) != null) {
+                    Integer lensFacingCameraCharacteristics = cameraCharacteristics.get(CameraCharacteristics.LENS_FACING);
+                    if (lensFacingCameraCharacteristics != null && lensFacingCameraCharacteristics == lensFacing) {
+                        StreamConfigurationMap map = cameraCharacteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
+                        if (map != null) {
+                            int deviceOrientation = getDeviceOrientation();
+                            mTotalRotation = sensorToDeviceRotation(cameraCharacteristics, deviceOrientation);
+                            mVideoSize = chooseOptimalSize(map.getOutputSizes(MediaRecorder.class));
+                            mCameraId = cameraId;
+                            return;
+                        }
+                    }
                 }
             }
         } catch (CameraAccessException e) {
             Log.e(TAG, "Camera setup failed.  Make sure you have granted camera permissions and try again.");
             destroyServiceOnException();
         }
+    }
+
+    private int getDeviceOrientation() {
+        int deviceOrientation;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            Display display = getSystemService(DisplayManager.class).getDisplay(Display.DEFAULT_DISPLAY);
+            deviceOrientation = display.getRotation();
+        } else {
+            deviceOrientation = mWindowManager.getDefaultDisplay().getRotation();
+        }
+        return deviceOrientation;
     }
 
     private void connectCamera() {
@@ -246,7 +275,7 @@ public class VideoRecorderService extends Service {
                                         null
                                 );
                             } catch (CameraAccessException e) {
-                                e.printStackTrace();
+                                Log.e(TAG, e.toString());
                             }
                         }
 
@@ -262,7 +291,7 @@ public class VideoRecorderService extends Service {
                     null
             );
         } catch (IOException | CameraAccessException e) {
-            e.printStackTrace();
+            Log.e(TAG, e.toString());
         }
     }
 
@@ -325,9 +354,14 @@ public class VideoRecorderService extends Service {
     }
 
     private static int sensorToDeviceRotation(CameraCharacteristics cameraCharacteristics, int deviceOrientation) {
-        int sensorOrientation = cameraCharacteristics.get(CameraCharacteristics.SENSOR_ORIENTATION);
-        deviceOrientation = ORIENTATIONS.get(deviceOrientation);
-        return (sensorOrientation + deviceOrientation + 360) % 360;
+        if (cameraCharacteristics != null) {
+            Integer sensorOrientation = cameraCharacteristics.get(CameraCharacteristics.SENSOR_ORIENTATION);
+            if (sensorOrientation != null) {
+                deviceOrientation = ORIENTATIONS.get(deviceOrientation);
+                return (sensorOrientation + deviceOrientation + 360) % 360;
+            }
+        }
+        return 0;
     }
 
     private static Size chooseOptimalSize(Size[] choices) {
@@ -357,7 +391,7 @@ public class VideoRecorderService extends Service {
         broadcastIntent.putExtra("msg", "An exception occurred in the recording service.");
         broadcastIntent.putExtra("code", "EXCEPTION");
         sendBroadcast(broadcastIntent);
-        this.stopForeground(true);
+        this.stopForeground(STOP_FOREGROUND_REMOVE);
         this.stopSelf();
     }
 
