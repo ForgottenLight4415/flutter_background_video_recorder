@@ -19,4 +19,7 @@ jobs:
       - run: flutter pub get
       - run: flutter analyze
       - run: flutter test
+      - name: Debug - show files modified by earlier steps
+        if: always()
+        run: git status --short && git diff
       - run: flutter pub publish --dry-run
