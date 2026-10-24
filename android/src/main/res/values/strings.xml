@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="fbvr_channel_name">Background video recording</string>
+    <string name="fbvr_channel_description">Shown while a video is being recorded in the background.</string>
+    <string name="fbvr_action_stop">Stop</string>
+    <string name="fbvr_alert_channel_name">Recording alerts</string>
+    <string name="fbvr_alert_channel_description">Tells you when a background recording stopped unexpectedly.</string>
+    <string name="fbvr_alert_title">Recording stopped</string>
+    <string name="fbvr_alert_reason_camera_lost">The camera was disconnected or taken over by another app.</string>
+    <string name="fbvr_alert_reason_camera_error">The camera reported an error.</string>
+    <string name="fbvr_alert_reason_storage_full">The device ran out of storage.</string>
+    <string name="fbvr_alert_reason_thermal">The device got too hot.</string>
+    <string name="fbvr_alert_reason_other">The recorder ran into a problem.</string>
+    <string name="fbvr_alert_saved">The recording so far was saved.</string>
+    <string name="fbvr_alert_not_saved">The recording could not be saved.</string>
+</resources>

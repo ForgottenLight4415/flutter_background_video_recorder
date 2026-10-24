@@ -1,21 +1,36 @@
 name: flutter_background_video_recorder
-description: A flutter plugin for Android to record videos in the background. Works even when the screen is locked or turned off.
-version: 1.0.0+2
+description: Record video or audio on Android from a foreground service, even with the screen off. Live preview, selectable resolution, frame rate and codec, optional location.
+version: 2.0.0
 repository: https://github.com/ForgottenLight4415/flutter_background_video_recorder
+issue_tracker: https://github.com/ForgottenLight4415/flutter_background_video_recorder/issues
+topics:
+  - camera
+  - video
+  - audio
+  - android
+  - background
+
+screenshots:
+  - description: The viewfinder with the live preview, ready to record.
+    path: screenshots/viewfinder.png
+  - description: Recording, with the elapsed time and a live preview.
+    path: screenshots/recording.png
+  - description: Choosing aspect ratio, resolution, frame rate and codec.
+    path: screenshots/settings.png
 
 environment:
-  sdk: '>=2.18.2 <3.0.0'
-  flutter: ">=2.5.0"
+  sdk: ^3.7.0
+  flutter: ">=3.29.0"
 
 dependencies:
   flutter:
     sdk: flutter
-  plugin_platform_interface: ^2.0.2
+  plugin_platform_interface: ^2.1.8
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
-  flutter_lints: ^2.0.0
+  flutter_lints: ^5.0.0
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec

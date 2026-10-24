@@ -1,38 +1,54 @@
-group 'com.lightsoftware.flutter_background_video_recorder.flutter_background_video_recorder'
-version '1.0'
+group = "com.lightsoftware.flutter_background_video_recorder"
+version = "2.0.0"
 
 buildscript {
+    ext.kotlin_version = "2.1.0"
     repositories {
         google()
         mavenCentral()
     }
 
     dependencies {
-        classpath 'com.android.tools.build:gradle:8.1.1'
+        classpath("com.android.tools.build:gradle:8.9.1")
+        classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version")
     }
 }
 
-rootProject.allprojects {
+allprojects {
     repositories {
         google()
         mavenCentral()
     }
 }
 
-apply plugin: 'com.android.library'
+apply plugin: "com.android.library"
+apply plugin: "kotlin-android"
 
 android {
-    namespace 'com.lightsoftware.flutter_background_video_recorder.flutter_background_video_recorder_example'
+    namespace = "com.lightsoftware.flutter_background_video_recorder.plugin"
 
-    compileSdk 34
+    compileSdk = 36
 
     compileOptions {
-        sourceCompatibility JavaVersion.VERSION_1_8
-        targetCompatibility JavaVersion.VERSION_1_8
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+
+    kotlinOptions {
+        jvmTarget = JavaVersion.VERSION_17
+    }
+
+    sourceSets {
+        main.java.srcDirs += "src/main/kotlin"
+        test.java.srcDirs += "src/test/kotlin"
     }
 
     defaultConfig {
-        minSdkVersion 28
-        targetSdkVersion 34
+        minSdk = 31
+    }
+
+    dependencies {
+        implementation("androidx.core:core-ktx:1.15.0")
+        testImplementation("junit:junit:4.13.2")
     }
 }
