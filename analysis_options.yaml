@@ -1,4 +1,10 @@
 include: package:flutter_lints/flutter.yaml
 
-# Additional information about this file can be found at
-# https://dart.dev/guides/language/analysis-options
+linter:
+  rules:
+    # Everything a user of the package can see is documented (also what pub.dev scores).
+    public_member_api_docs: true
+    # Futures are awaited or deliberately left (with unawaited()), never forgotten.
+    unawaited_futures: true
+    always_declare_return_types: true
+    directives_ordering: true

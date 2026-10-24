@@ -1,16 +1,17 @@
-# flutter_background_video_recorder_example
+# flutter_background_video_recorder example
 
-Demonstrates how to use the flutter_background_video_recorder plugin.
+A camera-style viewfinder built on the plugin: a live preview, a record button with a timer,
+Video / Audio modes, and a settings sheet for aspect ratio, resolution, frame rate and codec.
 
-## Getting Started
+Run it on an Android 12+ device or emulator:
 
-This project is a starting point for a Flutter application.
+```
+flutter run
+```
 
-A few resources to get you started if this is your first Flutter project:
+Where to look:
 
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
-
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+* `lib/recorder_controller.dart` holds all the state and what the buttons do. It is the part to
+  read to see how to use the plugin.
+* `lib/viewfinder_page.dart` draws the screen, including the `RecorderPreview` widget.
+* `lib/settings_sheet.dart` builds its pickers from `getVideoCapabilities()`.
