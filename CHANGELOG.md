@@ -1,9 +1,50 @@
+## 2.1.0
+Raw camera frames and microphone audio for apps that want to process the data themselves, a
+choice between the cameras of the device, and zoom. Nothing changes for apps that do not use them.
+
+### Added
+* **Raw frame stream.** `openFrameSession` opens a camera and delivers its frames to any number of
+  listeners of `RawFrameSession.frames` until `close()`. Choose the pixel format with
+  `RawFrameSettings`: YUV 4:2:0 (the default and cheapest), JPEG or RGBA. Each `RawFrame` carries
+  its planes, a timestamp and the rotation that makes it upright. It runs from its own foreground
+  service, so it continues in the background, and no recording is involved.
+* **Frames are delivered through shared native memory** (`dart:ffi`), not copied over a platform
+  channel: one native copy per frame, no serialization and no per-frame allocation in Dart. A
+  frame is valid while the listeners run; use `RawFrame.retain()` / `release()` or `toOwned()` to
+  keep one. `RawFrame.droppedFrames` reports frames dropped because the app was too slow. This adds
+  a small native library (C++, NDK) to the Android build.
+* **Raw audio stream.** `openAudioStream` delivers the microphone as 16-bit or float PCM chunks to
+  any number of listeners of `RawAudioSession.chunks`. Sample rate, channels, source and chunk
+  length are settings. If the app falls behind, sound is dropped and
+  `RecorderWarningCode.audioOverrun` is reported.
+* Both streams do no work while nobody listens. They are exclusive with recording where they share
+  hardware: while a frame session is open, recording a video or showing a preview fails with
+  `RecorderErrorCode.cameraBusy`; while an audio stream is open, recording fails with
+  `RecorderErrorCode.microphoneBusy`. They can run together.
+* **Camera selection.** `listCameras()` returns the cameras of the device as `CameraInfo` (position,
+  focal length, zoom range, a `lensType` guess). An optional `cameraId` on `getVideoCapabilities`,
+  `startVideoRecording`, `openFrameSession` and `RecorderPreview` picks one; `cameraFacing` still
+  works as before.
+* **Zoom.** `setZoom(ratio)` zooms the open camera, also while a recording is running, and an
+  `initialZoom` on `VideoSettings`, `RawFrameSettings` and `RecorderPreview` sets where a session
+  starts. `CameraInfo.zoomRange` tells what the camera supports.
+* New error codes `cameraBusy`, `microphoneBusy`, `cameraNotActive` and
+  `permissionPermanentlyDenied`. While developing, a raw session survives a hot restart, so opening
+  it again reports `cameraBusy` / `microphoneBusy`; stop the app and run it again (the error
+  message and the README say so).
+* The example app has a lens picker, a zoom selector with a fine-control wheel, and a Streams mode
+  that shows the raw streams with several listeners.
+
+### Changed
+* A back or front camera is now oriented and mirrored according to the camera that is really used,
+  not the requested facing.
+
 ## 2.0.0
 Modernized for Android 15 and 16. **Breaking changes**, see "Migrating from 1.x" in the README.
 
 ### Breaking
 * Requires Android 12 (`minSdk 31`) and Flutter 3.29+. Older Android versions are no longer supported.
-* Requires Dart 3.5+. The previous constraint (`<3.0.0`) prevented the package from resolving on any current Flutter.
+* Requires Dart 3.7+. The previous constraint (`<3.0.0`) prevented the package from resolving on any current Flutter.
 * The recording service is now declared by the plugin and lives at
   `com.lightsoftware.flutter_background_video_recorder.plugin.VideoRecorderService`. Remove the `services.VideoRecorderService` entry from your app manifest.
 * `startVideoRecording` returns `StartRecordingResult`, and resolves after the permission dialogs are answered.

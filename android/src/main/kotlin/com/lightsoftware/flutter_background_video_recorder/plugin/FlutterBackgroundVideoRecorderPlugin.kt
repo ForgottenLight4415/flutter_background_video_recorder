@@ -35,7 +35,10 @@ class FlutterBackgroundVideoRecorderPlugin :
     private lateinit var appContext: Context
     private lateinit var methodChannel: MethodChannel
     private lateinit var eventChannel: EventChannel
+    private lateinit var frameChannel: EventChannel
+    private lateinit var audioChannel: EventChannel
     private lateinit var previews: PreviewManager
+    private lateinit var sessions: RawSessions
 
     private var eventSink: EventChannel.EventSink? = null
     private var eventListener: RecorderStateListener? = null
@@ -51,13 +54,30 @@ class FlutterBackgroundVideoRecorderPlugin :
     override fun onAttachedToEngine(binding: FlutterPlugin.FlutterPluginBinding) {
         appContext = binding.applicationContext
         methodChannel = MethodChannel(binding.binaryMessenger, METHOD_CHANNEL).also { it.setMethodCallHandler(this) }
-        eventChannel = EventChannel(binding.binaryMessenger, EVENT_CHANNEL).also { it.setStreamHandler(this) }
         previews = PreviewManager(appContext, binding.textureRegistry) { event -> eventSink?.success(event) }
+        sessions = RawSessions(
+            appContext,
+            previews,
+            activity = { activityBinding?.activity },
+            otherPermissionRequestPending = { pendingStart != null },
+        )
+        eventChannel = EventChannel(binding.binaryMessenger, EVENT_CHANNEL).also { it.setStreamHandler(this) }
+        frameChannel = EventChannel(binding.binaryMessenger, FRAME_CHANNEL).also { it.setStreamHandler(sessions.frameStream) }
+        audioChannel = EventChannel(binding.binaryMessenger, AUDIO_CHANNEL).also { it.setStreamHandler(sessions.audioStream) }
     }
 
     override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
         methodChannel.setMethodCallHandler(null)
         eventChannel.setStreamHandler(null)
+        frameChannel.setStreamHandler(null)
+        audioChannel.setStreamHandler(null)
+        sessions.frameStream.onCancel(null)
+        sessions.audioStream.onCancel(null)
+        // Nothing is left to read what the raw sessions produce, so they end with the engine.
+        // Recordings are different: they are meant to outlive it.
+        sessions.closeAll()
+        // The Dart side that held frames is gone with the engine; take its references back.
+        FrameRingJni.abandonAllDartIfLoaded()
         previews.dispose()
         onCancel(null)
     }
@@ -67,7 +87,19 @@ class FlutterBackgroundVideoRecorderPlugin :
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
         when (call.method) {
             "getRecordingStatus" -> result.success(RecorderStateHolder.status.wire)
+            "listCameras" -> listCameras(result)
             "getVideoCapabilities" -> getVideoCapabilities(call, result)
+            "setZoom" -> setZoom(call, result)
+            "openFrameSession" -> sessions.openFrameSession(call, result)
+            "closeFrameSession" -> {
+                sessions.closeFrameSession()
+                result.success(null)
+            }
+            "openAudioStream" -> sessions.openAudioStream(call, result)
+            "closeAudioStream" -> {
+                sessions.closeAudioStream()
+                result.success(null)
+            }
             "startVideoRecording" -> startVideoRecording(call, result)
             "startAudioRecording" -> startAudioRecording(call, result)
             "stopRecording", "stopVideoRecording" -> stopRecording(result)
@@ -90,14 +122,15 @@ class FlutterBackgroundVideoRecorderPlugin :
             result.error("invalid_arguments", "Missing or invalid arguments for startVideoRecording.", null)
             return
         }
-        if (!canStart(result)) return
+        if (!canStart(result, usesCamera = true)) return
 
         // Resolve the video settings now, before asking for permissions, so that a setting this
         // camera cannot do fails immediately.
         val frontFacing = cameraFacing == FACING_FRONT
-        val capabilities = CameraCapabilitiesProvider.query(appContext, frontFacing)
+        val choice = CameraChoice(call.argument<String>("cameraId"), frontFacing)
+        val capabilities = CameraCapabilitiesProvider.query(appContext, choice)
         if (capabilities == null) {
-            result.error("camera_not_found", "No ${if (frontFacing) "front" else "rear"} camera available.", null)
+            result.error("camera_not_found", choice.notFoundMessage(), null)
             return
         }
         val video = try {
@@ -138,6 +171,8 @@ class FlutterBackgroundVideoRecorderPlugin :
                     notificationTitle,
                     notificationText,
                     preview = call.argument<Boolean>("preview") == true,
+                    cameraId = choice.cameraId,
+                    initialZoom = (call.argument<Number>("initialZoom"))?.toFloat() ?: 1f,
                 ),
                 embedLocation,
                 result,
@@ -154,7 +189,7 @@ class FlutterBackgroundVideoRecorderPlugin :
             result.error("invalid_arguments", "Missing or invalid arguments for startAudioRecording.", null)
             return
         }
-        if (!canStart(result)) return
+        if (!canStart(result, usesCamera = false)) return
         beginStart(
             StartRequest(
                 RecordingConfig(RecordingMode.AUDIO, folderName, false, null, notificationTitle, notificationText),
@@ -164,14 +199,25 @@ class FlutterBackgroundVideoRecorderPlugin :
         )
     }
 
-    /** Rejects the start if a recording is running or a permission dialog is open. */
-    private fun canStart(result: MethodChannel.Result): Boolean {
+    /**
+     * Rejects the start if a recording is running, a permission dialog is open or a raw session
+     * holds the microphone (and the camera, when the recording [usesCamera]).
+     */
+    private fun canStart(result: MethodChannel.Result, usesCamera: Boolean): Boolean {
         val status = RecorderStateHolder.status
         if (status == RecorderStatus.RECORDING || status == RecorderStatus.INITIALIZING) {
             result.error("already_recording", "A recording is already in progress.", null)
             return false
         }
-        if (pendingStart != null) {
+        if (AudioSessionHolder.holder.isOpen) {
+            result.error("microphone_busy", "An audio stream is using the microphone.$HOT_RESTART_HINT", null)
+            return false
+        }
+        if (usesCamera && FrameSessionHolder.holder.isOpen) {
+            result.error("camera_busy", "A frame session is using the camera.$HOT_RESTART_HINT", null)
+            return false
+        }
+        if (pendingStart != null || sessions.hasPendingPermissionRequest) {
             result.error("permission_request_in_progress", "A permission request is already in progress.", null)
             return false
         }
@@ -201,10 +247,10 @@ class FlutterBackgroundVideoRecorderPlugin :
             result.error("invalid_arguments", "Missing or invalid camera facing.", null)
             return
         }
-        val frontFacing = cameraFacing == FACING_FRONT
-        val capabilities = CameraCapabilitiesProvider.query(appContext, frontFacing)
+        val choice = CameraChoice(call.argument<String>("cameraId"), cameraFacing == FACING_FRONT)
+        val capabilities = CameraCapabilitiesProvider.query(appContext, choice)
         if (capabilities == null) {
-            result.error("camera_not_found", "No ${if (frontFacing) "front" else "rear"} camera available.", null)
+            result.error("camera_not_found", choice.notFoundMessage(), null)
             return
         }
         fun codecMap(support: CodecSupport) = mapOf("supported" to support.supported, "hardware" to support.hardware)
@@ -216,6 +262,9 @@ class FlutterBackgroundVideoRecorderPlugin :
         }
         result.success(
             mapOf(
+                "cameraId" to capabilities.cameraId,
+                "zoomMin" to capabilities.zoomRange.min.toDouble(),
+                "zoomMax" to capabilities.zoomRange.max.toDouble(),
                 "recommended" to recommended?.let {
                     mapOf("width" to it.dimension.width, "height" to it.dimension.height, "frameRate" to it.frameRate)
                 },
@@ -229,8 +278,6 @@ class FlutterBackgroundVideoRecorderPlugin :
             ),
         )
     }
-
-    private fun isValidFacing(value: String?) = value == FACING_FRONT || value == FACING_REAR
 
     private fun stopRecording(result: MethodChannel.Result) {
         val service = VideoRecorderService.instance
@@ -260,6 +307,10 @@ class FlutterBackgroundVideoRecorderPlugin :
             result.error("invalid_arguments", "Missing or invalid camera facing.", null)
             return
         }
+        if (FrameSessionHolder.holder.isOpen) {
+            result.error("camera_busy", "A frame session is using the camera.$HOT_RESTART_HINT", null)
+            return
+        }
         if (isGranted(Manifest.permission.CAMERA)) {
             runStartPreview(call, result)
             return
@@ -284,13 +335,51 @@ class FlutterBackgroundVideoRecorderPlugin :
         try {
             result.success(
                 previews.start(
-                    frontFacing = call.argument<String>("cameraFacing") == FACING_FRONT,
+                    choice = CameraChoice(call.argument<String>("cameraId"), call.argument<String>("cameraFacing") == FACING_FRONT),
                     wantedAspect = aspect,
                     mirrorFront = call.argument<Boolean>("mirrorFront") ?: true,
+                    initialZoom = (call.argument<Number>("initialZoom"))?.toFloat() ?: 1f,
                 ),
             )
         } catch (e: PreviewManager.PreviewException) {
             result.error(e.code, e.message, null)
+        }
+    }
+
+    /** The cameras of the device, for the app's camera picker. */
+    private fun listCameras(result: MethodChannel.Result) {
+        result.success(
+            CameraCapabilitiesProvider.listCameras(appContext).map {
+                mapOf(
+                    "id" to it.id,
+                    "position" to it.position,
+                    "sensorOrientation" to it.sensorOrientation,
+                    "focalLengthMm" to it.focalLengthMm?.toDouble(),
+                    "focalLengthEquivalentMm" to it.focalLengthEquivalentMm?.toDouble(),
+                    "minimumFocusDistance" to it.minimumFocusDistance?.toDouble(),
+                    "zoomMin" to it.zoomRange.min.toDouble(),
+                    "zoomMax" to it.zoomRange.max.toDouble(),
+                    "isLogicalMultiCamera" to it.isLogicalMultiCamera,
+                    "physicalCameraIds" to it.physicalCameraIds,
+                )
+            },
+        )
+    }
+
+    /** Zooms whichever camera is open: the recording, a frame session, or the viewfinder. */
+    private fun setZoom(call: MethodCall, result: MethodChannel.Result) {
+        val ratio = call.argument<Number>("ratio")?.toFloat()
+        if (ratio == null) {
+            result.error("invalid_arguments", "Missing zoom ratio.", null)
+            return
+        }
+        val applied = VideoRecorderService.instance?.setZoom(ratio)
+            ?: FrameCaptureService.instance?.setZoom(ratio)
+            ?: previews.setZoom(ratio)
+        if (applied == null) {
+            result.error("camera_not_active", "No camera is open to zoom.", null)
+        } else {
+            result.success(applied.toDouble())
         }
     }
 
@@ -312,6 +401,7 @@ class FlutterBackgroundVideoRecorderPlugin :
 
     private fun launchService(request: StartRequest) {
         // Mark the recorder busy right away: finding a position can take a few seconds.
+        RecorderStateHolder.activeMode = request.config.mode
         RecorderStateHolder.update(RecorderStatus.INITIALIZING)
         if (!request.embedLocation) {
             startService(request)
@@ -397,6 +487,7 @@ class FlutterBackgroundVideoRecorderPlugin :
             }
             return true
         }
+        if (sessions.onPermissionResult(requestCode)) return true
         if (requestCode != REQUEST_CODE_PERMISSIONS) return false
         val request = pendingStart ?: return true
         pendingStart = null
@@ -480,6 +571,7 @@ class FlutterBackgroundVideoRecorderPlugin :
             // The activity is gone for good, so the permission dialog result will never arrive.
             pendingStart?.result?.error("no_activity", "The activity was destroyed before permissions were granted.", null)
             pendingStart = null
+            sessions.failPendingPermissionRequest()
         }
     }
 
@@ -488,11 +580,10 @@ class FlutterBackgroundVideoRecorderPlugin :
     private companion object {
         const val METHOD_CHANNEL = "flutter_background_video_recorder"
         const val EVENT_CHANNEL = "flutter_background_video_recorder_event"
+        const val FRAME_CHANNEL = "flutter_background_video_recorder_frames"
+        const val AUDIO_CHANNEL = "flutter_background_video_recorder_audio"
         const val REQUEST_CODE_PERMISSIONS = 4415
         const val REQUEST_CODE_PREVIEW_PERMISSION = 4416
-
-        const val FACING_FRONT = "front"
-        const val FACING_REAR = "rear"
 
         const val RESULT_STARTED = "started"
         const val RESULT_PERMISSION_DENIED = "permissionDenied"

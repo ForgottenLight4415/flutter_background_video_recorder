@@ -15,5 +15,13 @@
             android:name=".VideoRecorderService"
             android:exported="false"
             android:foregroundServiceType="camera|microphone" />
+        <service
+            android:name=".FrameCaptureService"
+            android:exported="false"
+            android:foregroundServiceType="camera" />
+        <service
+            android:name=".AudioCaptureService"
+            android:exported="false"
+            android:foregroundServiceType="microphone" />
     </application>
 </manifest>

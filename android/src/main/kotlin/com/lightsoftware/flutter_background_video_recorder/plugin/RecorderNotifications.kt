@@ -22,12 +22,25 @@ import androidx.core.content.ContextCompat
 internal object RecorderNotifications {
     /** Id of the ongoing notification, as given to `startForeground`. */
     const val FOREGROUND_ID = 4415
+
+    /** Ids of the ongoing notifications of a frame session and an audio stream. */
+    const val FRAME_FOREGROUND_ID = 4417
+    const val AUDIO_FOREGROUND_ID = 4418
     private const val ALERT_ID = 4416
     private const val FOREGROUND_CHANNEL = "flutter_background_video_recorder"
     private const val ALERT_CHANNEL = "flutter_background_video_recorder_alerts"
 
-    /** The ongoing notification, with a Stop button and a tap that opens the app. */
-    fun foreground(context: Context, title: String, text: String): Notification {
+    /**
+     * The ongoing notification, with a Stop button and a tap that opens the app. The Stop button
+     * sends [stopAction] to [stopService], which is the recording service unless a raw session asks.
+     */
+    fun foreground(
+        context: Context,
+        title: String,
+        text: String,
+        stopService: Class<*> = VideoRecorderService::class.java,
+        stopAction: String = VideoRecorderService.ACTION_STOP,
+    ): Notification {
         ensureChannel(
             context,
             FOREGROUND_CHANNEL,
@@ -38,7 +51,7 @@ internal object RecorderNotifications {
         val stop = PendingIntent.getService(
             context,
             0,
-            Intent(context, VideoRecorderService::class.java).setAction(VideoRecorderService.ACTION_STOP),
+            Intent(context, stopService).setAction(stopAction),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
         return NotificationCompat.Builder(context, FOREGROUND_CHANNEL)

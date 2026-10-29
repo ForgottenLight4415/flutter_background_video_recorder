@@ -7,6 +7,137 @@ enum CameraFacing {
   frontCamera,
 }
 
+/// Where a camera sits on the device.
+enum CameraPosition {
+  /// On the screen side of the device, for selfies.
+  front,
+
+  /// On the back of the device.
+  rear,
+
+  /// An external camera, for example one connected over USB.
+  external,
+}
+
+/// The kind of lens of a camera, as far as it can be told from the camera's measurements.
+///
+/// See [CameraInfo.lensType] for how it is worked out.
+enum CameraLensType {
+  /// A wider view than the main camera.
+  ultraWide,
+
+  /// The main camera.
+  wide,
+
+  /// A narrower view than the main camera, which brings distant things closer.
+  telephoto,
+
+  /// A camera made for focusing on very close things.
+  macro,
+
+  /// It could not be told, for example because the device does not report the lens size.
+  unknown,
+}
+
+/// The zoom ratios a camera supports. 1.0 is the camera's normal view, smaller values zoom out
+/// and larger values zoom in.
+class ZoomRange {
+  /// The zoom ratios from [min] to [max].
+  const ZoomRange(this.min, this.max);
+
+  /// A camera that cannot zoom.
+  static const ZoomRange none = ZoomRange(1, 1);
+
+  /// The smallest ratio, for example 0.6 on a camera that can zoom out.
+  final double min;
+
+  /// The largest ratio, for example 10.
+  final double max;
+
+  /// Whether [ratio] can be set.
+  bool contains(double ratio) => ratio >= min && ratio <= max;
+
+  /// [ratio] limited to this range.
+  double clamp(double ratio) => ratio.clamp(min, max);
+
+  @override
+  bool operator ==(Object other) =>
+      other is ZoomRange && other.min == min && other.max == max;
+
+  @override
+  int get hashCode => Object.hash(min, max);
+
+  @override
+  String toString() => 'ZoomRange($min..$max)';
+}
+
+/// One camera of the device, as reported by [FlutterBackgroundVideoRecorder.listCameras].
+class CameraInfo {
+  /// Describes one camera.
+  const CameraInfo({
+    required this.id,
+    required this.position,
+    required this.sensorOrientation,
+    this.zoomRange = ZoomRange.none,
+    this.focalLengthMm,
+    this.focalLengthEquivalentMm,
+    this.minimumFocusDistance,
+    this.isLogicalMultiCamera = false,
+    this.physicalCameraIds = const [],
+  });
+
+  /// An opaque id to pass as `cameraId` to pick this camera. It is stable on one device.
+  final String id;
+
+  /// Where the camera sits.
+  final CameraPosition position;
+
+  /// How many degrees clockwise the sensor is turned relative to the device's natural orientation.
+  final int sensorOrientation;
+
+  /// The zoom ratios this camera supports.
+  final ZoomRange zoomRange;
+
+  /// The focal length in millimetres, if the device reports it.
+  final double? focalLengthMm;
+
+  /// The focal length as it would be on a 35 mm film camera, which makes lenses on sensors of
+  /// different sizes comparable (about 24 to 28 for a main camera, 13 to 16 for an ultra-wide
+  /// one, 50 and more for a telephoto). Null if the device does not report the sensor size.
+  final double? focalLengthEquivalentMm;
+
+  /// The shortest distance the camera can focus at, in diopters (1 divided by the distance in
+  /// metres, so a larger number means closer). Null or 0 for a camera that cannot focus.
+  final double? minimumFocusDistance;
+
+  /// True for a camera that combines several back cameras and switches between them as the zoom
+  /// changes. [zoomRange] then reaches across all of them.
+  final bool isLogicalMultiCamera;
+
+  /// The ids of the cameras a [isLogicalMultiCamera] camera is made of. For information only:
+  /// they cannot be chosen directly.
+  final List<String> physicalCameraIds;
+
+  /// A guess at the kind of lens, from [focalLengthEquivalentMm] and [minimumFocusDistance]:
+  /// under about 20 mm is [CameraLensType.ultraWide]; otherwise a camera that can focus closer than
+  /// about 4 cm is [CameraLensType.macro]; under about 40 mm is [CameraLensType.wide]; longer is
+  /// [CameraLensType.telephoto]. It is [CameraLensType.unknown] without a focal length.
+  ///
+  /// It is a heuristic and some devices will be classified differently from how their maker calls
+  /// the cameras. Use the measurements themselves if you need to be sure.
+  CameraLensType get lensType {
+    final equivalent = focalLengthEquivalentMm;
+    if (equivalent == null) return CameraLensType.unknown;
+    if (equivalent < 20) return CameraLensType.ultraWide;
+    if ((minimumFocusDistance ?? 0) >= 25) return CameraLensType.macro;
+    if (equivalent < 40) return CameraLensType.wide;
+    return CameraLensType.telephoto;
+  }
+
+  @override
+  String toString() => 'CameraInfo($id, ${position.name}, ${lensType.name})';
+}
+
 /// How the video is compressed.
 enum VideoCodec {
   /// H.264 (AVC). Plays everywhere. The default.
@@ -95,6 +226,7 @@ class VideoSettings {
     this.bitrate,
     this.embedLocation = false,
     this.preview = false,
+    this.initialZoom = 1.0,
   });
 
   /// The video size. Leave null for the default.
@@ -128,6 +260,10 @@ class VideoSettings {
   /// set to true. It costs a little extra GPU work, and on a device that cannot deliver a second
   /// stream next to the recording the recording simply goes ahead without a preview.
   final bool preview;
+
+  /// The zoom ratio the recording starts with, limited to what the camera supports. Change it
+  /// later with [FlutterBackgroundVideoRecorder.setZoom], also while recording.
+  final double initialZoom;
 }
 
 /// A video size and the frame rates it can be recorded at.
@@ -169,7 +305,15 @@ class VideoCapabilities {
     required this.hevc,
     this.defaultResolution,
     this.defaultFrameRate,
+    this.cameraId,
+    this.zoomRange = ZoomRange.none,
   });
+
+  /// The id of the camera these capabilities belong to, see [CameraInfo.id].
+  final String? cameraId;
+
+  /// The zoom ratios the camera supports.
+  final ZoomRange zoomRange;
 
   /// Supported sizes, largest first.
   final List<VideoMode> modes;

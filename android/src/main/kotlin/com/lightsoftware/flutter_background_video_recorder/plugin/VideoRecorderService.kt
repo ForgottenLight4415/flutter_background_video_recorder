@@ -56,6 +56,11 @@ class VideoRecorderService : Service() {
     private var selectedStabilization = false
     private var aeRange: FpsRange? = null
 
+    /** The capture request that keeps running, so that the zoom can be changed while recording. */
+    private var captureRequest: CaptureRequest.Builder? = null
+    private var zoomRange = ZoomRange.NONE
+    private var zoom = 1f
+
     private var thermalListener: PowerManager.OnThermalStatusChangedListener? = null
     private var thermalWarned = false
 
@@ -116,6 +121,27 @@ class VideoRecorderService : Service() {
     }
 
     // region Public API for the plugin (main thread only)
+
+    /**
+     * Zooms the recording to [ratio], limited to what the camera supports, and returns what was
+     * applied. Null when no video recording is running. Changing the zoom re-sends the repeating
+     * capture request; the recorder is not touched.
+     */
+    internal fun setZoom(ratio: Float): Float? {
+        if (!active || RecorderStateHolder.activeMode != RecordingMode.VIDEO) return null
+        zoom = zoomRange.clamp(ratio)
+        val builder = captureRequest ?: return zoom
+        val running = session ?: return zoom
+        builder.set(CaptureRequest.CONTROL_ZOOM_RATIO, zoom)
+        try {
+            running.setRepeatingRequest(builder.build(), null, mainHandler)
+        } catch (e: CameraAccessException) {
+            Log.w(TAG, "Could not change the zoom", e)
+        } catch (e: IllegalStateException) {
+            Log.w(TAG, "Could not change the zoom", e)
+        }
+        return zoom
+    }
 
     /** Stops an active recording and returns the saved media, or null if it could not be saved. */
     internal fun stopRecording(): RecordedMedia? {
@@ -197,16 +223,18 @@ class VideoRecorderService : Service() {
         if (!isGranted(Manifest.permission.CAMERA) || !isGranted(Manifest.permission.RECORD_AUDIO)) {
             return fail("permission_denied", "Camera and microphone permissions are required.")
         }
-        val capabilities = CameraCapabilitiesProvider.query(this, config.frontFacing)
-            ?: return fail("camera_not_found", "No ${if (config.frontFacing) "front" else "rear"} camera available.")
+        val capabilities = CameraCapabilitiesProvider.query(this, config.camera)
+            ?: return fail("camera_not_found", config.camera.notFoundMessage())
         val selection = CameraSelection(
             id = capabilities.cameraId,
             orientationHint = videoOrientationHint(
                 capabilities.sensorOrientation,
                 displayRotationDegrees(this),
-                config.frontFacing,
+                capabilities.frontFacing,
             ),
         )
+        zoomRange = capabilities.zoomRange
+        zoom = zoomRange.clamp(config.initialZoom)
         selectedStabilization = capabilities.stabilization
         aeRange = chooseAeRange(capabilities.aeRanges, video.frameRate)
 
@@ -368,12 +396,14 @@ class VideoRecorderService : Service() {
         val request = device.createCaptureRequest(CameraDevice.TEMPLATE_RECORD).apply {
             addTarget(surface)
             preview?.let { addTarget(it) }
+            set(CaptureRequest.CONTROL_ZOOM_RATIO, zoom)
             set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO)
             aeRange?.let { set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, Range(it.lower, it.upper)) }
             if (stabilization) {
                 set(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE, CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_ON)
             }
         }
+        captureRequest = request
         val configuration = SessionConfiguration(
             SessionConfiguration.SESSION_REGULAR,
             listOfNotNull(OutputConfiguration(surface), preview?.let { PreviewRelay.outputConfiguration(it) }),
@@ -461,6 +491,7 @@ class VideoRecorderService : Service() {
         session = null
         camera?.close()
         camera = null
+        captureRequest = null
         mediaRecorder?.release()
 
         if (destination == null) return null

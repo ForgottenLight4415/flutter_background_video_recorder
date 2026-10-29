@@ -23,13 +23,22 @@ class RecorderPreview extends StatefulWidget {
   const RecorderPreview({
     super.key,
     required this.cameraFacing,
+    this.cameraId,
     this.resolution,
     this.mirrorFront = true,
+    this.initialZoom = 1.0,
     this.placeholder = const ColoredBox(color: Color(0xFF000000)),
   });
 
-  /// Which camera to show.
+  /// Which camera to show, when [cameraId] is not set.
   final CameraFacing cameraFacing;
+
+  /// The id of the camera to show, from `listCameras`. It wins over [cameraFacing].
+  final String? cameraId;
+
+  /// The zoom ratio the viewfinder starts with. Change it later with
+  /// [FlutterBackgroundVideoRecorder.setZoom].
+  final double initialZoom;
 
   /// The size of the video that will be recorded. The preview uses the same aspect ratio, so it
   /// shows what the video will contain. Leave null for the default video size.
@@ -75,6 +84,7 @@ class _RecorderPreviewState extends State<RecorderPreview>
   void didUpdateWidget(RecorderPreview oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.cameraFacing != widget.cameraFacing ||
+        oldWidget.cameraId != widget.cameraId ||
         oldWidget.resolution != widget.resolution ||
         oldWidget.mirrorFront != widget.mirrorFront) {
       _stop();
@@ -116,8 +126,10 @@ class _RecorderPreviewState extends State<RecorderPreview>
     try {
       final info = await _platform.startPreview(
         cameraFacing: widget.cameraFacing,
+        cameraId: widget.cameraId,
         resolution: widget.resolution,
         mirrorFront: widget.mirrorFront,
+        initialZoom: widget.initialZoom,
       );
       if (!mounted || generation != _generation) {
         // Removed or replaced while starting.

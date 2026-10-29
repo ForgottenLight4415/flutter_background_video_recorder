@@ -19,4 +19,6 @@ jobs:
       - run: flutter pub get
       - run: flutter analyze
       - run: flutter test
+      # The native frame ring, on the CI machine, with the memory checkers on.
+      - run: SANITIZE=1 CXX=clang++ ./scripts/test_native.sh
       - run: flutter pub publish --dry-run

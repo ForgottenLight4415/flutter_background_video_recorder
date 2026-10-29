@@ -28,7 +28,12 @@ internal data class RecordingConfig(
     val location: Coordinates? = null,
     /** Feed the camera picture to the on-screen preview too (see [PreviewRelay]). */
     val preview: Boolean = false,
+    /** The chosen camera; null means the first one facing the way [frontFacing] says. */
+    val cameraId: String? = null,
+    val initialZoom: Float = 1f,
 ) {
+    val camera: CameraChoice get() = CameraChoice(cameraId, frontFacing)
+
     fun toIntent(context: Context): Intent {
         val intent = Intent(context, VideoRecorderService::class.java)
             .setAction(VideoRecorderService.ACTION_START)
@@ -38,6 +43,8 @@ internal data class RecordingConfig(
             .putExtra(EXTRA_NOTIFICATION_TITLE, notificationTitle)
             .putExtra(EXTRA_NOTIFICATION_TEXT, notificationText)
             .putExtra(EXTRA_PREVIEW, preview)
+            .putExtra(EXTRA_ZOOM, initialZoom)
+        cameraId?.let { intent.putExtra(EXTRA_CAMERA_ID, it) }
         location?.let { intent.putExtra(EXTRA_LATITUDE, it.latitude).putExtra(EXTRA_LONGITUDE, it.longitude) }
         video?.let {
             intent.putExtra(EXTRA_WIDTH, it.dimension.width)
@@ -59,6 +66,8 @@ internal data class RecordingConfig(
         private const val EXTRA_CODEC = "codec"
         private const val EXTRA_BITRATE = "bitrate"
         private const val EXTRA_PREVIEW = "preview"
+        private const val EXTRA_CAMERA_ID = "cameraId"
+        private const val EXTRA_ZOOM = "zoom"
         private const val EXTRA_LATITUDE = "latitude"
         private const val EXTRA_LONGITUDE = "longitude"
         private const val EXTRA_NOTIFICATION_TITLE = "notificationTitle"
@@ -90,6 +99,8 @@ internal data class RecordingConfig(
                 notificationTitle = intent.getStringExtra(EXTRA_NOTIFICATION_TITLE).orEmpty(),
                 notificationText = intent.getStringExtra(EXTRA_NOTIFICATION_TEXT).orEmpty(),
                 preview = intent.getBooleanExtra(EXTRA_PREVIEW, false),
+                cameraId = intent.getStringExtra(EXTRA_CAMERA_ID),
+                initialZoom = intent.getFloatExtra(EXTRA_ZOOM, 1f),
                 location = if (intent.hasExtra(EXTRA_LATITUDE) && intent.hasExtra(EXTRA_LONGITUDE)) {
                     Coordinates(intent.getDoubleExtra(EXTRA_LATITUDE, 0.0), intent.getDoubleExtra(EXTRA_LONGITUDE, 0.0))
                 } else {

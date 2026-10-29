@@ -1,5 +1,5 @@
 group = "com.lightsoftware.flutter_background_video_recorder"
-version = "2.0.0"
+version = "2.1.0"
 
 buildscript {
     ext.kotlin_version = "2.1.0"
@@ -45,6 +45,24 @@ android {
 
     defaultConfig {
         minSdk = 31
+        // Rules apps pick up when they shrink their release build.
+        consumerProguardFiles "consumer-rules.pro"
+    }
+
+    // The native library that moves camera frames to Dart through shared memory.
+    externalNativeBuild {
+        cmake {
+            path = "src/main/cpp/CMakeLists.txt"
+        }
+    }
+
+    testOptions {
+        unitTests.all {
+            // A build of the native library for this machine (scripts/test_native.sh --jni), so the
+            // JNI layer can be tested on the JVM. The tests that need it are skipped without it.
+            def hostLib = System.getenv("FBVR_HOST_LIB")
+            if (hostLib != null) systemProperty "fbvr.host.lib", hostLib
+        }
     }
 
     dependencies {

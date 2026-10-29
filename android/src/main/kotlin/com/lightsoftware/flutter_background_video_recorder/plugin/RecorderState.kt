@@ -32,6 +32,10 @@ internal object RecorderStateHolder {
     var status: RecorderStatus = RecorderStatus.STOPPED
         private set
 
+    /** What the running (or starting) recording uses, or null when there is none. */
+    @Volatile
+    var activeMode: RecordingMode? = null
+
     private val listeners = java.util.concurrent.CopyOnWriteArrayList<RecorderStateListener>()
 
     fun addListener(listener: RecorderStateListener) {
@@ -49,6 +53,7 @@ internal object RecorderStateHolder {
         video: RecordedMedia? = null,
     ) {
         this.status = status
+        if (status == RecorderStatus.STOPPED || status == RecorderStatus.ERROR) activeMode = null
         mainHandler.post { listeners.forEach { it.onStateChanged(status, errorCode, errorMessage, video) } }
     }
 

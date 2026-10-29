@@ -21,6 +21,12 @@ abstract final class Viewfinder {
   /// The recording colour.
   static const Color record = Color(0xFFFF3B30);
 
+  /// The zoom disc that is in use, and the value shown on the zoom wheel.
+  static const Color zoomActive = Color(0xFFFFD60A);
+
+  /// A live stream that is being received.
+  static const Color live = Color(0xFF34C759);
+
   static const double iconSize = 24;
 
   /// Smallest comfortable touch target (Material asks for 48dp).

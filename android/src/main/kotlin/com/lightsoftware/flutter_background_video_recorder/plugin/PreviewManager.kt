@@ -32,12 +32,16 @@ internal class PreviewManager(
 
     private class Active(
         val producer: TextureRegistry.SurfaceProducer,
-        val frontFacing: Boolean,
         val mirrorFront: Boolean,
         val wantedAspect: Double?,
         val capabilities: CameraCapabilities,
         var buffer: VideoDimension,
+        /** The zoom the viewfinder starts with, and the last one set while it ran. */
+        var zoom: Float,
     ) {
+        /** The camera's real facing, which decides how its picture is turned and mirrored. */
+        val frontFacing: Boolean get() = capabilities.frontFacing
+
         /** Total clockwise turn from the camera's buffer to an upright picture. */
         var rotation = 0
 
@@ -68,20 +72,41 @@ internal class PreviewManager(
         PreviewRelay.inputSizeListener = { size -> mainHandler.post { onInputSize(size) } }
     }
 
+    /** True while the viewfinder camera is open, which makes the camera unavailable to a frame session. */
+    val holdsCamera: Boolean get() = camera?.isRunning == true
+
     /**
-     * Starts (or restarts) the preview for the camera facing [frontFacing]. [wantedAspect] is the
-     * aspect ratio of the video that will be recorded, so the preview shows what it will contain.
+     * Zooms the viewfinder and returns the ratio applied, or null when the viewfinder camera is not
+     * running.
+     */
+    fun setZoom(ratio: Float): Float? {
+        val preview = active ?: return null
+        val viewfinder = camera?.takeIf { it.isRunning } ?: return null
+        return viewfinder.setZoom(ratio).also { preview.zoom = it }
+    }
+
+    /**
+     * Starts (or restarts) the preview for the chosen camera. [wantedAspect] is the aspect ratio
+     * of the video that will be recorded, so the preview shows what it will contain.
      * Returns what Flutter needs to show it.
      */
-    fun start(frontFacing: Boolean, wantedAspect: Double?, mirrorFront: Boolean): Map<String, Any?> {
+    fun start(
+        choice: CameraChoice,
+        wantedAspect: Double?,
+        mirrorFront: Boolean,
+        initialZoom: Float = 1f,
+    ): Map<String, Any?> {
         stopInternal()
-        val capabilities = CameraCapabilitiesProvider.query(context, frontFacing)
-            ?: throw PreviewException("camera_not_found", "No ${if (frontFacing) "front" else "rear"} camera available.")
+        val capabilities = CameraCapabilitiesProvider.query(context, choice)
+            ?: throw PreviewException(
+                "camera_not_found",
+                if (choice.cameraId != null) "The chosen camera is not available." else "No ${if (choice.frontFacing) "front" else "rear"} camera available.",
+            )
         val buffer = choosePreviewDimension(capabilities.previewSizes, wantedAspect)
             ?: throw PreviewException("camera_unavailable", "The camera offers no preview size.")
 
         val producer = textures.createSurfaceProducer()
-        val preview = Active(producer, frontFacing, mirrorFront, wantedAspect, capabilities, buffer)
+        val preview = Active(producer, mirrorFront, wantedAspect, capabilities, buffer, capabilities.zoomRange.clamp(initialZoom))
         updateOrientation(preview)
         producer.setSize(preview.upright.width, preview.upright.height)
         producer.setCallback(
@@ -143,7 +168,7 @@ internal class PreviewManager(
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
             return false
         }
-        val viewfinder = PreviewCamera(context) {
+        val viewfinder = PreviewCamera(context, preview.capabilities.zoomRange, preview.zoom) {
             mainHandler.post {
                 camera = null
                 active?.let { notifyChanged(it, live = false) }

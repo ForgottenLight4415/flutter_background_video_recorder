@@ -59,6 +59,24 @@ enum RecorderErrorCode {
   /// The recording failed for another reason. [RecorderException.message] has details.
   recordingFailed,
 
+  /// The camera is already used by a recording, a preview or a frame session.
+  ///
+  /// While developing, this is also what you get after a **hot restart** with a raw session
+  /// open: the Dart side starts afresh but the session keeps running. Stop the app and run it
+  /// again (see "Things to know" in the README).
+  cameraBusy,
+
+  /// The microphone is already used by a recording or an audio stream. After a hot restart with an
+  /// audio stream open this is the same development-time situation as [cameraBusy] describes.
+  microphoneBusy,
+
+  /// There is no open camera to zoom: start a recording, a preview or a frame session first.
+  cameraNotActive,
+
+  /// A permission was denied and Android no longer shows its dialog. Send the user to
+  /// [FlutterBackgroundVideoRecorder.openAppSettings].
+  permissionPermanentlyDenied,
+
   /// An error this version of the package does not know about.
   unknown;
 
@@ -83,6 +101,10 @@ enum RecorderErrorCode {
     'unsupported_configuration' => unsupportedConfiguration,
     'location_permission_not_declared' => locationPermissionNotDeclared,
     'recording_failed' => recordingFailed,
+    'camera_busy' => cameraBusy,
+    'microphone_busy' => microphoneBusy,
+    'camera_not_active' => cameraNotActive,
+    'permission_permanently_denied' => permissionPermanentlyDenied,
     _ => unknown,
   };
 }
@@ -118,6 +140,10 @@ enum RecorderWarningCode {
   /// the recording.
   previewUnavailable,
 
+  /// The app did not take the audio of an [RawAudioSession] fast enough, so some of it was
+  /// dropped.
+  audioOverrun,
+
   /// A warning this version of the package does not know about.
   unknown;
 
@@ -125,6 +151,7 @@ enum RecorderWarningCode {
   static RecorderWarningCode fromWire(String? code) => switch (code) {
     'thermal_warning' => thermalWarning,
     'preview_unavailable' => previewUnavailable,
+    'audio_overrun' => audioOverrun,
     _ => unknown,
   };
 }
