@@ -1,8 +1,12 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_background_video_recorder/flutter_background_video_recorder.dart';
 
+import 'streams_controller.dart';
+
+/// What a [UiMessage] tells the user, which decides how the page shows it.
 enum UiMessageKind { saved, warning, error, permissionBlocked }
 
 /// Something the page should tell the user: shown as a snack bar, or (for a permission the user
@@ -14,12 +18,23 @@ class UiMessage {
   final String text;
 }
 
+/// What the capture controls do: record a video, record sound, or hand out the raw streams.
+enum CaptureMode { video, audio, streams }
+
+/// The zoom ratios offered as discs, when the camera supports them.
+const zoomPresetValues = [0.6, 1.0, 2.0, 3.0, 5.0, 50.0, 100.0];
+
 /// All the state of the viewfinder, and what its buttons do. The page only draws it.
 class RecorderController extends ChangeNotifier {
   RecorderController(
     this.recorder, {
     this.tickInterval = const Duration(seconds: 1),
-  });
+  }) {
+    streams = StreamsController(recorder, this);
+  }
+
+  /// The raw frame and audio streams of the Streams mode.
+  late final StreamsController streams;
 
   final FlutterBackgroundVideoRecorder recorder;
 
@@ -42,8 +57,20 @@ class RecorderController extends ChangeNotifier {
   /// starts once, with the right size, instead of starting and then restarting.
   bool capabilitiesSettled = false;
 
-  bool audioOnly = false;
+  CaptureMode mode = CaptureMode.video;
   bool embedLocation = false;
+
+  /// The cameras of the device, and the one chosen. A null [cameraId] means the first camera that
+  /// faces the way [facing] says.
+  List<CameraInfo> cameras = const [];
+  String? cameraId;
+
+  /// The zoom ratio asked for. It is applied whenever a camera is open, and starts the next
+  /// recording, preview or frame session.
+  double zoom = 1.0;
+  double? _pendingZoom;
+  bool _zoomInFlight = false;
+  Timer? _zoomRamp;
 
   /// Recordings keep a preview available (needed to show one while recording).
   bool previewEnabled = true;
@@ -64,6 +91,9 @@ class RecorderController extends ChangeNotifier {
 
   Stream<UiMessage> get messages => _messages.stream;
 
+  bool get audioOnly => mode == CaptureMode.audio;
+  bool get streamsMode => mode == CaptureMode.streams;
+
   bool get isRecording => status == RecorderStatus.recording;
   bool get isStarting => status == RecorderStatus.initializing;
 
@@ -73,7 +103,45 @@ class RecorderController extends ChangeNotifier {
   /// Settings can change only while idle.
   bool get canEdit => !isRecording && !isBusy;
 
-  bool get previewShown => !audioOnly && previewEnabled && previewVisible;
+  bool get previewShown =>
+      mode == CaptureMode.video && previewEnabled && previewVisible;
+
+  /// The camera in use: the chosen one, or the first that faces the way [facing] says.
+  CameraInfo? get selectedCamera {
+    for (final camera in cameras) {
+      if (cameraId != null ? camera.id == cameraId : _isInGroup(camera)) {
+        return camera;
+      }
+    }
+    return null;
+  }
+
+  bool _isInGroup(CameraInfo camera) =>
+      facing == CameraFacing.frontCamera
+          ? camera.position == CameraPosition.front
+          : camera.position != CameraPosition.front;
+
+  /// The cameras on the side the user is looking at: all the back (and external) ones, or the
+  /// front ones.
+  List<CameraInfo> get camerasInGroup => [
+    for (final camera in cameras)
+      if (_isInGroup(camera)) camera,
+  ];
+
+  /// The camera picker locks while recording and while a frame session holds the camera.
+  bool get cameraLocked => !canEdit || streams.frameOpen;
+
+  /// The zoom ratios the camera in use supports.
+  ZoomRange get zoomRange =>
+      selectedCamera?.zoomRange ?? capabilities?.zoomRange ?? ZoomRange.none;
+
+  /// The zoom discs to show: the presets this camera supports.
+  List<double> get zoomPresets => [
+    for (final value in zoomPresetValues)
+      if (zoomRange.contains(value)) value,
+  ];
+
+  bool get canZoom => !audioOnly && zoomRange.max > zoomRange.min;
 
   /// The preview widget may be built: wanted, and the camera's settings are known.
   bool get previewReady => previewShown && capabilitiesSettled;
@@ -89,6 +157,7 @@ class RecorderController extends ChangeNotifier {
   /// For example `16:9 · 1080p · 60`.
   String get summary {
     if (audioOnly) return 'Audio · AAC';
+    if (streamsMode) return 'Raw streams';
     final size = resolution;
     if (size == null) return 'Loading…';
     final parts = [
@@ -115,6 +184,7 @@ class RecorderController extends ChangeNotifier {
       ..add(recorder.recorderState.listen(_onStatus))
       ..add(recorder.recorderWarnings.listen(_onWarning))
       ..add(recorder.recorderErrors.listen(_onRecordingError));
+    unawaited(loadCameras());
     unawaited(loadCapabilities());
     // The recorder may still be running from before the app was closed.
     _onStatus(await recorder.getRecordingStatus());
@@ -126,15 +196,29 @@ class RecorderController extends ChangeNotifier {
       subscription.cancel();
     }
     _clock?.cancel();
+    _zoomRamp?.cancel();
+    streams.dispose();
     _messages.close();
     super.dispose();
   }
 
   // region Settings
 
+  Future<void> loadCameras() async {
+    try {
+      cameras = await recorder.listCameras();
+      notifyListeners();
+    } on RecorderException catch (e) {
+      say(UiMessageKind.error, describe(e));
+    }
+  }
+
   Future<void> loadCapabilities() async {
     try {
-      final loaded = await recorder.getVideoCapabilities(facing);
+      final loaded = await recorder.getVideoCapabilities(
+        facing,
+        cameraId: cameraId,
+      );
       capabilities = loaded;
       final keep =
           _sizeChosen &&
@@ -148,7 +232,7 @@ class RecorderController extends ChangeNotifier {
       }
       _fixFrameRate();
     } on RecorderException catch (e) {
-      _say(UiMessageKind.error, _describe(e));
+      say(UiMessageKind.error, describe(e));
     }
     capabilitiesSettled = true;
     notifyListeners();
@@ -183,9 +267,12 @@ class RecorderController extends ChangeNotifier {
     notifyListeners();
   }
 
-  void setAudioOnly(bool value) {
-    if (!canEdit) return;
-    audioOnly = value;
+  /// Switches what the capture controls do. Leaving Streams mode closes the raw sessions.
+  void setMode(CaptureMode value) {
+    if (isRecording || isBusy || mode == value) return;
+    final leavingStreams = mode == CaptureMode.streams;
+    mode = value;
+    if (leavingStreams) unawaited(streams.closeAll());
     notifyListeners();
   }
 
@@ -217,14 +304,88 @@ class RecorderController extends ChangeNotifier {
   // region Actions
 
   Future<void> flipCamera() async {
-    if (!canEdit) return;
+    if (cameraLocked) return;
     facing =
         facing == CameraFacing.rearCamera
             ? CameraFacing.frontCamera
             : CameraFacing.rearCamera;
+    cameraId = null;
+    _resetZoom();
     capabilitiesSettled = false;
     notifyListeners();
     await loadCapabilities();
+  }
+
+  /// Switches to the camera with the id [id]: another lens on the same side, or another side.
+  Future<void> selectCamera(String id) async {
+    if (cameraLocked || id == selectedCamera?.id) return;
+    final camera = cameras.where((camera) => camera.id == id).firstOrNull;
+    if (camera == null) return;
+    facing =
+        camera.position == CameraPosition.front
+            ? CameraFacing.frontCamera
+            : CameraFacing.rearCamera;
+    cameraId = id;
+    _resetZoom();
+    capabilitiesSettled = false;
+    notifyListeners();
+    await loadCapabilities();
+  }
+
+  void _resetZoom() {
+    _zoomRamp?.cancel();
+    zoom = 1.0;
+    _pendingZoom = null;
+  }
+
+  /// Zooms to [ratio], limited to what the camera supports. Works while recording. Updates
+  /// reach the camera one at a time, the latest winning, so a drag does not flood it.
+  Future<void> setZoom(double ratio) async {
+    zoom = zoomRange.clamp(ratio);
+    notifyListeners();
+    _pendingZoom = zoom;
+    if (_zoomInFlight) return;
+    _zoomInFlight = true;
+    try {
+      while (_pendingZoom != null) {
+        final wanted = _pendingZoom!;
+        _pendingZoom = null;
+        try {
+          await recorder.setZoom(wanted);
+        } on RecorderException catch (e) {
+          // No camera is open yet: the zoom is kept and starts the next session.
+          if (e.code != RecorderErrorCode.cameraNotActive) {
+            say(UiMessageKind.error, describe(e));
+          }
+        }
+      }
+    } finally {
+      _zoomInFlight = false;
+    }
+  }
+
+  /// Zooms to a disc's value, in a short glide unless [animate] is off.
+  void zoomTo(double target, {bool animate = true}) {
+    _zoomRamp?.cancel();
+    target = zoomRange.clamp(target);
+    if (!animate || target == zoom) {
+      unawaited(setZoom(target));
+      return;
+    }
+    // Ease through the zoom's logarithm, because 1x to 2x should feel like 2x to 4x.
+    final from = math.log(zoom);
+    final to = math.log(target);
+    const steps = 10;
+    var step = 0;
+    _zoomRamp = Timer.periodic(const Duration(milliseconds: 20), (timer) {
+      step++;
+      final t = step / steps;
+      final eased = 1 - math.pow(1 - t, 3);
+      unawaited(
+        setZoom(step >= steps ? target : math.exp(from + (to - from) * eased)),
+      );
+      if (step >= steps) timer.cancel();
+    });
   }
 
   Future<void> toggleRecording() async {
@@ -234,7 +395,7 @@ class RecorderController extends ChangeNotifier {
     try {
       if (isRecording) {
         final media = await recorder.stopRecording();
-        _say(
+        say(
           UiMessageKind.saved,
           'Saved ${media.path ?? media.uri}'
           '${media.hasLocation ? ' · with location' : ''}',
@@ -250,6 +411,7 @@ class RecorderController extends ChangeNotifier {
                 : await recorder.startVideoRecording(
                   folderName: 'Example Recorder',
                   cameraFacing: facing,
+                  cameraId: cameraId,
                   notificationTitle: 'Recording video',
                   notificationText: 'Tap to return to the app',
                   settings: VideoSettings(
@@ -258,24 +420,25 @@ class RecorderController extends ChangeNotifier {
                     codec: codec,
                     embedLocation: embedLocation,
                     preview: previewEnabled,
+                    initialZoom: zoom,
                   ),
                 );
         switch (result) {
           case StartRecordingResult.started:
             break;
           case StartRecordingResult.permissionDenied:
-            _say(
+            say(
               UiMessageKind.error,
               audioOnly
                   ? 'The microphone permission is required.'
                   : 'The camera and microphone permissions are required.',
             );
           case StartRecordingResult.permissionPermanentlyDenied:
-            _say(UiMessageKind.permissionBlocked, 'Permissions are blocked.');
+            say(UiMessageKind.permissionBlocked, 'Permissions are blocked.');
         }
       }
     } on RecorderException catch (e) {
-      _say(UiMessageKind.error, _describe(e));
+      say(UiMessageKind.error, describe(e));
     } finally {
       requestInFlight = false;
       notifyListeners();
@@ -312,31 +475,42 @@ class RecorderController extends ChangeNotifier {
   }
 
   void _onWarning(RecorderWarning warning) {
-    _say(UiMessageKind.warning, switch (warning.code) {
+    say(UiMessageKind.warning, switch (warning.code) {
       RecorderWarningCode.thermalWarning =>
         'The device is getting hot. The recording may stop to protect it.',
       RecorderWarningCode.previewUnavailable =>
         'This camera cannot show a preview while recording.',
+      RecorderWarningCode.audioOverrun =>
+        'The audio stream is falling behind, some sound was dropped.',
       RecorderWarningCode.unknown => 'Warning: ${warning.message}',
     });
   }
 
   void _onRecordingError(RecorderException error) {
     final saved = error.savedMedia;
-    _say(
+    say(
       UiMessageKind.error,
-      '${_describe(error)}'
+      '${describe(error)}'
       '${saved == null ? '' : ' Saved ${saved.path ?? saved.uri}'}',
     );
   }
 
   // endregion
 
-  void _say(UiMessageKind kind, String text) {
+  /// Tells the user something through the page: a snack bar, or a dialog for a blocked permission.
+  void say(UiMessageKind kind, String text) {
     if (!_messages.isClosed) _messages.add(UiMessage(kind, text));
   }
 
-  static String _describe(RecorderException e) => switch (e.code) {
+  /// A sentence for the user for each way an operation can fail.
+  static String describe(RecorderException e) => switch (e.code) {
+    RecorderErrorCode.cameraBusy =>
+      'The camera is busy. Stop the recording, preview or stream that uses it first. After a hot restart, stop the app and run it again.',
+    RecorderErrorCode.microphoneBusy =>
+      'The microphone is busy. Stop the recording or audio stream that uses it first. After a hot restart, stop the app and run it again.',
+    RecorderErrorCode.cameraNotActive => 'There is no open camera to zoom.',
+    RecorderErrorCode.permissionDenied =>
+      'The permission is needed to start the stream.',
     RecorderErrorCode.alreadyRecording => 'A recording is already running.',
     RecorderErrorCode.notRecording => 'Nothing is being recorded.',
     RecorderErrorCode.foregroundServiceNotAllowed =>

@@ -8,6 +8,9 @@ continues while the app is in the background, closed, or the screen is off or lo
   device really supports (default 1080p at 60 fps), and the codec (H.264, or HEVC for smaller files)
 * **Audio only** recordings that use only the microphone
 * **Live preview** in your app, before and during a recording. Hiding it is just removing a widget
+* **Choose the camera** (wide, ultra-wide, telephoto, ...) and **zoom**, also while recording
+* **Raw streams** for apps that process the data themselves: camera frames (YUV, JPEG or RGBA) and
+  microphone samples (PCM), each readable by any number of listeners, in the background
 * Optional **location** stored in the video's metadata
 * Recordings are saved with `MediaStore` (videos in `Movies/<folder>`, audio in
   `Recordings/<folder>`) and show up in the gallery and audio apps
@@ -166,11 +169,104 @@ Things to know:
 * The viewfinder asks for the camera permission if it is missing. When the app goes to the
   background it stops, and it starts again on return.
 
+## Choosing a camera and zoom
+
+```dart
+final cameras = await recorder.listCameras(); // wide, ultra-wide, telephoto, front, ...
+final telephoto = cameras.firstWhere((c) => c.lensType == CameraLensType.telephoto);
+
+await recorder.startVideoRecording(
+  folderName: 'Clips',
+  cameraFacing: CameraFacing.rearCamera, // used when no cameraId is given
+  cameraId: telephoto.id,
+  notificationTitle: 'Recording',
+  notificationText: 'Tap to return',
+  settings: const VideoSettings(initialZoom: 2),
+);
+
+await recorder.setZoom(3.5); // also while recording; returns the ratio that was applied
+```
+
+`cameraId` also works with `getVideoCapabilities`, `openFrameSession` and `RecorderPreview`, so the
+sizes and frame rates you offer are those of the camera you use. `CameraInfo.zoomRange` is what the
+camera supports (for example 0.6 to 10). `lensType` is a guess from the focal length and focus
+distance; use `focalLengthEquivalentMm` and `minimumFocusDistance` if you need to be sure.
+
+Zoom changes what the camera delivers, so the recording, the preview and the raw frames all zoom
+together. `setZoom` throws `RecorderErrorCode.cameraNotActive` when no camera is open.
+
+## Raw frames and audio
+
+If you want the camera pictures or the sound yourself (to analyse, stream or encode them) open a
+session. It is independent of recording: nothing is saved, and the recorder is not involved.
+
+```dart
+final session = await recorder.openFrameSession(
+  cameraFacing: CameraFacing.rearCamera,
+  notificationTitle: 'Camera is on',
+  notificationText: 'Tap to return',
+  settings: const RawFrameSettings(format: RawFrameFormat.yuv420, maxFrameRate: 15),
+);
+
+session.frames.listen((frame) {
+  // frame.planes, frame.width, frame.height, frame.rotationDegrees, frame.timestampNs
+  // Read the pixels here, in place. They are native memory that is reused, see below.
+});
+session.frames.listen(sendToTheCloud); // any number of listeners can read the same session
+
+await session.close();
+```
+
+```dart
+final audio = await recorder.openAudioStream(
+  notificationTitle: 'Microphone is on',
+  notificationText: 'Tap to return',
+  settings: const RawAudioSettings(sampleRate: 44100, channels: 1),
+);
+audio.chunks.listen((chunk) => process(chunk.bytes)); // little-endian PCM
+await audio.close();
+```
+
+* Formats: `yuv420` (the camera's own format, the cheapest; the planes may have row padding, see
+  `RawFramePlane.bytesPerRow`), `jpeg` (one image per frame) and `rgba` (four bytes a pixel).
+  Frames are not rotated; turn them by `rotationDegrees` to make them upright.
+* **Frames are shared memory, not copies.** Large frames (a 1080p YUV frame is about 3 MB) are
+  written once into native memory and read by your app in place through `dart:ffi`, so nothing is
+  serialized or copied per frame. The price is that **a frame is valid only while your listener
+  runs**: afterwards its memory is reused for a later picture, and reading `frame.planes` then
+  throws a `StateError`. To work on a frame later (after an `await`, or in another isolate) call
+  `frame.retain()` inside the listener and `frame.release()` when done, or take a copy with
+  `frame.toOwned()`. A few frames are in flight at a time: if you hold on to them, new pictures are
+  dropped (see `RawFrame.droppedFrames`), so release promptly.
+* Both sessions run from a foreground service with a notification and keep going when the app is in
+  the background. Like recording, open them while the app is visible. They end when the Flutter
+  engine goes away.
+* While nobody listens to a session, the camera or microphone stays on but no frames or sound are
+  prepared, so it costs next to nothing. If the app reads too slowly, frames are dropped (and
+  audio is dropped with a `RecorderWarningCode.audioOverrun` warning) instead of piling up.
+  Audio chunks are small (about 88 KB a second) and are delivered as ordinary copies.
+* The camera and the microphone cannot be shared with recording: opening a frame session while
+  recording a video or showing a preview, or the other way around, fails with
+  `RecorderErrorCode.cameraBusy`; likewise `microphoneBusy` for the microphone. A frame session and
+  an audio stream can run together.
+* An error such as a lost camera arrives as a `RecorderException` on the stream, after which the
+  session is over.
+* **In development, stop and restart the app rather than hot restarting it.** The session keeps
+  running natively across a hot restart, so opening it again fails with `cameraBusy` or
+  `microphoneBusy` until the app is stopped (see "Things to know").
+
+The example app's **Streams** mode shows all of this: subscribe to either stream, add and remove
+listeners, and watch the frames and the audio level arrive.
+
 ## Setup
 
 Nothing to add to your `AndroidManifest.xml` (except for [location](#location-in-the-video), if you
-use it): the permissions and the recording service are merged in from the plugin. You need `minSdk 31`
+use it): the permissions and the services are merged in from the plugin. You need `minSdk 31`
 or higher and Flutter 3.29 or newer.
+
+The plugin includes a small native library (for the raw frame stream) that is compiled when your app
+is built, so the Android **NDK and CMake** must be installed. Android Studio installs them with the
+SDK, and Gradle downloads them on its own when it is allowed to.
 
 | Permission | Why |
 | --- | --- |
@@ -211,7 +307,15 @@ The notification text can be changed by overriding the `fbvr_alert_*` string res
 * Recording is owned by the service, not the Activity. It survives the app being swiped away as long
   as Android keeps the process alive, which it does while the foreground service runs.
 * Android shows its camera/microphone privacy indicators while recording. This cannot be disabled.
-* Only one recording at a time is supported.
+* **While developing, stop the app and run it again; do not rely on hot restart** if you use a raw
+  frame session or audio stream. A session runs in a foreground service that outlives your Dart
+  code, so a hot restart throws away the `RawFrameSession` / `RawAudioSession` you held but not the
+  session itself. The camera or microphone stays taken, opening a new session fails with
+  `RecorderErrorCode.cameraBusy` / `microphoneBusy` (the error message says so), and frames the old
+  code held stay reserved. Stopping the app ends the service and clears all of it. Hot *reload* is
+  not affected.
+* Only one recording at a time is supported. A raw frame session or audio stream takes the camera
+  or microphone away from recording (see "Raw frames and audio").
 * **Recording while the phone is in a pocket or the screen is off works**, but Android limits what a
   background app may *start*: begin the recording while your app is visible.
 * If the device runs low on storage the recording stops cleanly with what was recorded so far
@@ -230,6 +334,18 @@ The notification text can be changed by overriding the `fbvr_alert_*` string res
 | `showToast` | Removed. Toasts do not work from the background on modern Android; react to `recorderState` instead. |
 | Failures were reported as `PlatformException`s with numeric codes | `RecorderException` with a `RecorderErrorCode` |
 | Supported Android 9 and up, Flutter 2.5 and up | Requires Android 12 (`minSdk 31`) and Flutter 3.29 |
+
+## Native code
+
+Frames travel through a small C++ library (`android/src/main/cpp`) built with the NDK and CMake for
+each ABI, and aligned for 16 KB memory pages. Its ring of memory slots and pixel conversions have
+their own tests, which run on the development machine:
+
+```sh
+scripts/test_native.sh          # the C++ tests (SANITIZE=1 adds the address/undefined checkers)
+scripts/test_native.sh --jni    # also builds the library for this machine and prints the Gradle
+                                # command that runs the JNI tests against it
+```
 
 ## Contributing
 

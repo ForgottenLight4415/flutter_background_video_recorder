@@ -9,7 +9,15 @@ class _FakePlatform extends FlutterBackgroundVideoRecorderPlatform
     with MockPlatformInterfaceMixin {
   final events = StreamController<RecorderEvent>.broadcast();
   final started =
-      <({CameraFacing facing, VideoResolution? resolution, bool mirror})>[];
+      <
+        ({
+          CameraFacing facing,
+          String? cameraId,
+          VideoResolution? resolution,
+          bool mirror,
+          double zoom,
+        })
+      >[];
   final stopped = <int>[];
   var nextId = 1;
   var active = true;
@@ -21,13 +29,17 @@ class _FakePlatform extends FlutterBackgroundVideoRecorderPlatform
   @override
   Future<PreviewInfo> startPreview({
     required CameraFacing cameraFacing,
+    String? cameraId,
     VideoResolution? resolution,
     bool mirrorFront = true,
+    double initialZoom = 1.0,
   }) async {
     started.add((
       facing: cameraFacing,
+      cameraId: cameraId,
       resolution: resolution,
       mirror: mirrorFront,
+      zoom: initialZoom,
     ));
     if (startError != null) throw startError!;
     return PreviewInfo(
@@ -238,4 +250,33 @@ void main() {
       expect(platform.started, hasLength(2));
     },
   );
+
+  testWidgets('passes the chosen camera and zoom to the preview and restarts '
+      'when the camera changes', (tester) async {
+    await tester.pumpWidget(
+      host(
+        const RecorderPreview(
+          cameraFacing: CameraFacing.rearCamera,
+          cameraId: '2',
+          initialZoom: 2.0,
+        ),
+      ),
+    );
+    await tester.pump();
+    expect(platform.started.last.cameraId, '2');
+    expect(platform.started.last.zoom, 2.0);
+
+    await tester.pumpWidget(
+      host(
+        const RecorderPreview(
+          cameraFacing: CameraFacing.rearCamera,
+          cameraId: '3',
+          initialZoom: 2.0,
+        ),
+      ),
+    );
+    await tester.pump();
+    expect(platform.started, hasLength(2));
+    expect(platform.started.last.cameraId, '3');
+  });
 }

@@ -12,6 +12,7 @@ void main() {
   runApp(const MyApp());
 }
 
+/// The example app: a camera-style screen that shows what the package can do.
 class MyApp extends StatefulWidget {
   const MyApp({
     super.key,

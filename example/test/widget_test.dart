@@ -12,7 +12,12 @@ class FakePlatform extends FlutterBackgroundVideoRecorderPlatform
   CameraFacing? lastFacing;
   VideoSettings? lastSettings;
   final capabilityRequests = <CameraFacing>[];
+  final capabilityCameraIds = <String?>[];
   final startedPreviews = <CameraFacing>[];
+  final startedPreviewCameras = <String?>[];
+  String? lastCameraId;
+  final zooms = <double>[];
+  var cameras = <CameraInfo>[];
   final stoppedPreviews = <int>[];
   var audioStarts = 0;
   var settingsOpened = 0;
@@ -25,12 +30,23 @@ class FakePlatform extends FlutterBackgroundVideoRecorderPlatform
   @override
   Stream<RecorderEvent> get recorderEvents => events.stream;
 
+  @override
+  Future<List<CameraInfo>> listCameras() async => cameras;
+
+  @override
+  Future<double> setZoom(double ratio) async {
+    zooms.add(ratio);
+    return ratio;
+  }
+
   // The rear camera does 1080p60; the front one only 720p30. Their defaults differ.
   @override
   Future<VideoCapabilities> getVideoCapabilities(
-    CameraFacing cameraFacing,
-  ) async {
+    CameraFacing cameraFacing, {
+    String? cameraId,
+  }) async {
     capabilityRequests.add(cameraFacing);
+    capabilityCameraIds.add(cameraId);
     const codecs = (
       h264: CodecSupport(supported: true, hardwareAccelerated: true),
       hevc: CodecSupport(supported: true, hardwareAccelerated: false),
@@ -65,8 +81,10 @@ class FakePlatform extends FlutterBackgroundVideoRecorderPlatform
     required CameraFacing cameraFacing,
     required String notificationTitle,
     required String notificationText,
+    String? cameraId,
     VideoSettings settings = const VideoSettings(),
   }) async {
+    lastCameraId = cameraId;
     lastFacing = cameraFacing;
     lastSettings = settings;
     return startResult;
@@ -89,10 +107,13 @@ class FakePlatform extends FlutterBackgroundVideoRecorderPlatform
   @override
   Future<PreviewInfo> startPreview({
     required CameraFacing cameraFacing,
+    String? cameraId,
     VideoResolution? resolution,
     bool mirrorFront = true,
+    double initialZoom = 1.0,
   }) async {
     startedPreviews.add(cameraFacing);
+    startedPreviewCameras.add(cameraId);
     return PreviewInfo(
       textureId: startedPreviews.length,
       width: 720,

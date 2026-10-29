@@ -22,12 +22,22 @@ import androidx.core.content.ContextCompat
  *
  * Main thread only.
  */
-internal class PreviewCamera(private val context: Context, private val onLost: () -> Unit) {
+internal class PreviewCamera(
+    private val context: Context,
+    private val zoomRange: ZoomRange,
+    initialZoom: Float,
+    private val onLost: () -> Unit,
+) {
     private val mainHandler = Handler(Looper.getMainLooper())
     private var device: CameraDevice? = null
     private var session: CameraCaptureSession? = null
     private var inputSurface: Surface? = null
+    private var request: CaptureRequest.Builder? = null
     private var stopped = false
+
+    /** The zoom ratio in use, limited to what the camera supports. */
+    var zoom = zoomRange.clamp(initialZoom)
+        private set
 
     val isRunning: Boolean get() = !stopped
 
@@ -43,9 +53,26 @@ internal class PreviewCamera(private val context: Context, private val onLost: (
         }
     }
 
+    /** Changes the zoom and returns the ratio that was applied. */
+    fun setZoom(ratio: Float): Float {
+        zoom = zoomRange.clamp(ratio)
+        val builder = request ?: return zoom
+        val running = session ?: return zoom
+        builder.set(CaptureRequest.CONTROL_ZOOM_RATIO, zoom)
+        try {
+            running.setRepeatingRequest(builder.build(), null, mainHandler)
+        } catch (e: CameraAccessException) {
+            Log.w(TAG, "Could not change the zoom", e)
+        } catch (e: IllegalStateException) {
+            Log.w(TAG, "Could not change the zoom", e)
+        }
+        return zoom
+    }
+
     fun stop() {
         if (stopped) return
         stopped = true
+        request = null
         session?.close()
         session = null
         device?.close()
@@ -71,10 +98,12 @@ internal class PreviewCamera(private val context: Context, private val onLost: (
             device = opened
             val surface = inputSurface ?: return lose("No input surface")
             try {
-                val request = opened.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
+                val builder = opened.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
                     addTarget(surface)
                     set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
+                    set(CaptureRequest.CONTROL_ZOOM_RATIO, zoom)
                 }
+                request = builder
                 opened.createCaptureSession(
                     SessionConfiguration(
                         SessionConfiguration.SESSION_REGULAR,
@@ -88,7 +117,7 @@ internal class PreviewCamera(private val context: Context, private val onLost: (
                                 }
                                 session = configured
                                 try {
-                                    configured.setRepeatingRequest(request.build(), null, mainHandler)
+                                    configured.setRepeatingRequest(builder.build(), null, mainHandler)
                                 } catch (e: CameraAccessException) {
                                     lose("Could not start the viewfinder", e)
                                 }

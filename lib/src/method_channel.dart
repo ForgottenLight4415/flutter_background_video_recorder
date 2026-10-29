@@ -1,13 +1,25 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
+import 'ffi_frame_memory.dart';
 import 'models.dart';
 import 'platform_interface.dart';
+import 'wire.dart';
 
 /// The [FlutterBackgroundVideoRecorderPlatform] that talks to Android over a method channel and
 /// an event channel.
 class MethodChannelFlutterBackgroundVideoRecorder
     extends FlutterBackgroundVideoRecorderPlatform {
+  /// Creates the platform. [frameMemory] reads the frames of a frame session; tests pass their own,
+  /// the default reads native memory through `dart:ffi`.
+  MethodChannelFlutterBackgroundVideoRecorder({NativeFrameMemory? frameMemory})
+    : _frameMemory = frameMemory;
+
+  NativeFrameMemory? _frameMemory;
+  NativeFrameMemory get _memory => _frameMemory ??= FfiFrameMemory();
+
   /// The method channel used to interact with the native platform.
   @visibleForTesting
   static const MethodChannel methodChannel = MethodChannel(
@@ -20,71 +32,73 @@ class MethodChannelFlutterBackgroundVideoRecorder
     'flutter_background_video_recorder_event',
   );
 
+  /// The event channel that carries the frames of a frame session.
+  @visibleForTesting
+  static const EventChannel frameChannel = EventChannel(
+    'flutter_background_video_recorder_frames',
+  );
+
+  /// The event channel that carries the sound of an audio stream.
+  @visibleForTesting
+  static const EventChannel audioChannel = EventChannel(
+    'flutter_background_video_recorder_audio',
+  );
+
   // Created once so that every listener shares a single native subscription.
   late final Stream<RecorderEvent> _events = eventChannel
       .receiveBroadcastStream()
-      .map(_parseEvent);
+      .map(eventFromWire);
+
+  // The native side tells a session has ended with a 'closed' event (null here) instead of
+  // closing the channel, because a closed event channel could not be listened to again.
+  late final Stream<RawFrame?> _frameEvents = frameChannel
+      .receiveBroadcastStream()
+      .map((event) => frameFromWire(event, _memory));
+  late final Stream<RawAudioChunk?> _audioEvents = audioChannel
+      .receiveBroadcastStream()
+      .map(audioChunkFromWire);
 
   @override
   Future<RecorderStatus> getRecordingStatus() async {
     final status = await _invoke<String>('getRecordingStatus');
-    return _parseStatus(status);
+    return statusFromWire(status);
   }
 
   @override
   Stream<RecorderEvent> get recorderEvents => _events;
 
-  static String _facing(CameraFacing facing) => switch (facing) {
-    CameraFacing.frontCamera => 'front',
-    CameraFacing.rearCamera => 'rear',
-  };
+  @override
+  Future<List<CameraInfo>> listCameras() async {
+    final result = await _invoke<List<Object?>>('listCameras');
+    return [
+      for (final raw in result ?? const <Object?>[])
+        cameraFromWire(raw as Map<Object?, Object?>),
+    ];
+  }
+
+  @override
+  Future<double> setZoom(double ratio) async {
+    final applied = await _invoke<num>('setZoom', {'ratio': ratio});
+    return applied?.toDouble() ?? ratio;
+  }
 
   @override
   Future<VideoCapabilities> getVideoCapabilities(
-    CameraFacing cameraFacing,
-  ) async {
-    final result = await _invoke<Map<Object?, Object?>>(
-      'getVideoCapabilities',
-      {'cameraFacing': _facing(cameraFacing)},
-    );
+    CameraFacing cameraFacing, {
+    String? cameraId,
+  }) async {
+    final result =
+        await _invoke<Map<Object?, Object?>>('getVideoCapabilities', {
+          'cameraFacing': facingToWire(cameraFacing),
+          if (cameraId != null) 'cameraId': cameraId,
+        });
     if (result == null) {
       throw const RecorderException(
         RecorderErrorCode.unknown,
         'The recorder did not report any capabilities.',
       );
     }
-    CodecSupport codec(Object? raw) {
-      final map = (raw as Map<Object?, Object?>?) ?? const {};
-      return CodecSupport(
-        supported: map['supported'] == true,
-        hardwareAccelerated: map['hardware'] == true,
-      );
-    }
-
-    final codecs = (result['codecs'] as Map<Object?, Object?>?) ?? const {};
-    final recommended = result['recommended'] as Map<Object?, Object?>?;
-    return VideoCapabilities(
-      defaultResolution:
-          recommended == null
-              ? null
-              : VideoResolution(
-                recommended['width'] as int,
-                recommended['height'] as int,
-              ),
-      defaultFrameRate: recommended?['frameRate'] as int?,
-      modes: [
-        for (final raw in (result['modes'] as List<Object?>? ?? const []))
-          VideoMode(
-            VideoResolution(
-              (raw as Map<Object?, Object?>)['width'] as int,
-              raw['height'] as int,
-            ),
-            List<int>.from(raw['frameRates'] as List<Object?>),
-          ),
-      ],
-      h264: codec(codecs['h264']),
-      hevc: codec(codecs['hevc']),
-    );
+    return capabilitiesFromWire(result);
   }
 
   @override
@@ -93,11 +107,13 @@ class MethodChannelFlutterBackgroundVideoRecorder
     required CameraFacing cameraFacing,
     required String notificationTitle,
     required String notificationText,
+    String? cameraId,
     VideoSettings settings = const VideoSettings(),
   }) async {
     final result = await _invoke<String>('startVideoRecording', {
       'folderName': folderName,
-      'cameraFacing': _facing(cameraFacing),
+      'cameraFacing': facingToWire(cameraFacing),
+      if (cameraId != null) 'cameraId': cameraId,
       'notificationTitle': notificationTitle,
       'notificationText': notificationText,
       if (settings.resolution != null) ...{
@@ -109,8 +125,9 @@ class MethodChannelFlutterBackgroundVideoRecorder
       if (settings.bitrate != null) 'bitrate': settings.bitrate,
       if (settings.embedLocation) 'embedLocation': true,
       if (settings.preview) 'preview': true,
+      if (settings.initialZoom != 1.0) 'initialZoom': settings.initialZoom,
     });
-    return _parseStartResult(result);
+    return startResultFromWire(result);
   }
 
   @override
@@ -124,24 +141,8 @@ class MethodChannelFlutterBackgroundVideoRecorder
       'notificationTitle': notificationTitle,
       'notificationText': notificationText,
     });
-    return _parseStartResult(result);
+    return startResultFromWire(result);
   }
-
-  static StartRecordingResult _parseStartResult(String? result) =>
-      switch (result) {
-        'started' => StartRecordingResult.started,
-        'permissionDenied' => StartRecordingResult.permissionDenied,
-        'permissionPermanentlyDenied' =>
-          StartRecordingResult.permissionPermanentlyDenied,
-        _ =>
-          throw RecorderException(
-            RecorderErrorCode.unknown,
-            'Unexpected start result: $result',
-          ),
-      };
-
-  static RecordedMediaKind _parseKind(Object? kind) =>
-      kind == 'audio' ? RecordedMediaKind.audio : RecordedMediaKind.video;
 
   @override
   Future<RecordedMedia> stopRecording() async {
@@ -156,7 +157,7 @@ class MethodChannelFlutterBackgroundVideoRecorder
     return RecordedMedia(
       uri: uri,
       path: result?['path'] as String?,
-      kind: _parseKind(result?['kind']),
+      kind: mediaKindFromWire(result?['kind']),
       hasLocation: result?['hasLocation'] == true,
     );
   }
@@ -164,11 +165,15 @@ class MethodChannelFlutterBackgroundVideoRecorder
   @override
   Future<PreviewInfo> startPreview({
     required CameraFacing cameraFacing,
+    String? cameraId,
     VideoResolution? resolution,
     bool mirrorFront = true,
+    double initialZoom = 1.0,
   }) async {
     final result = await _invoke<Map<Object?, Object?>>('startPreview', {
-      'cameraFacing': _facing(cameraFacing),
+      'cameraFacing': facingToWire(cameraFacing),
+      if (cameraId != null) 'cameraId': cameraId,
+      if (initialZoom != 1.0) 'initialZoom': initialZoom,
       if (resolution != null) ...{
         'width': resolution.width,
         'height': resolution.height,
@@ -181,7 +186,7 @@ class MethodChannelFlutterBackgroundVideoRecorder
         'The recorder did not start a preview.',
       );
     }
-    return _parsePreview(result);
+    return previewFromWire(result);
   }
 
   @override
@@ -189,12 +194,111 @@ class MethodChannelFlutterBackgroundVideoRecorder
     await _invoke<void>('stopPreview', {'textureId': textureId});
   }
 
-  static PreviewInfo _parsePreview(Map<Object?, Object?> map) => PreviewInfo(
-    textureId: (map['textureId'] as num).toInt(),
-    width: map['width'] as int,
-    height: map['height'] as int,
-    active: map['active'] == true,
+  @override
+  Future<RawFrameSessionInfo> openFrameSession({
+    required CameraFacing cameraFacing,
+    required String notificationTitle,
+    required String notificationText,
+    String? cameraId,
+    RawFrameSettings settings = const RawFrameSettings(),
+  }) async {
+    final result = await _invoke<Map<Object?, Object?>>('openFrameSession', {
+      'cameraFacing': facingToWire(cameraFacing),
+      if (cameraId != null) 'cameraId': cameraId,
+      'notificationTitle': notificationTitle,
+      'notificationText': notificationText,
+      'format': settings.format.name,
+      if (settings.resolution != null) ...{
+        'width': settings.resolution!.width,
+        'height': settings.resolution!.height,
+      },
+      if (settings.maxFrameRate != null) 'maxFrameRate': settings.maxFrameRate,
+      'jpegQuality': settings.jpegQuality,
+      if (settings.initialZoom != 1.0) 'initialZoom': settings.initialZoom,
+    });
+    if (result == null) {
+      throw const RecorderException(
+        RecorderErrorCode.unknown,
+        'The recorder did not open a frame session.',
+      );
+    }
+    return RawFrameSessionInfo(
+      cameraId: result['cameraId'] as String,
+      width: result['width'] as int,
+      height: result['height'] as int,
+      format: frameFormatFromWire(result['format']),
+    );
+  }
+
+  @override
+  Future<void> closeFrameSession() async {
+    await _invoke<void>('closeFrameSession');
+  }
+
+  @override
+  Stream<RawFrame> get rawFrames => _asRecorderErrors(
+    _frameEvents.takeWhile((frame) => frame != null).map((frame) => frame!),
   );
+
+  @override
+  Future<RawAudioSessionInfo> openAudioStream({
+    required String notificationTitle,
+    required String notificationText,
+    RawAudioSettings settings = const RawAudioSettings(),
+  }) async {
+    final result = await _invoke<Map<Object?, Object?>>('openAudioStream', {
+      'notificationTitle': notificationTitle,
+      'notificationText': notificationText,
+      'sampleRate': settings.sampleRate,
+      'channels': settings.channels,
+      'encoding': settings.encoding.name,
+      'source': settings.source.name,
+      'chunkMs': settings.chunkDuration.inMilliseconds,
+    });
+    if (result == null) {
+      throw const RecorderException(
+        RecorderErrorCode.unknown,
+        'The recorder did not open an audio stream.',
+      );
+    }
+    return RawAudioSessionInfo(
+      sampleRate: result['sampleRate'] as int,
+      channels: result['channels'] as int,
+      encoding: audioEncodingFromWire(result['encoding']),
+    );
+  }
+
+  @override
+  Future<void> closeAudioStream() async {
+    await _invoke<void>('closeAudioStream');
+  }
+
+  @override
+  Stream<RawAudioChunk> get rawAudio => _asRecorderErrors(
+    _audioEvents.takeWhile((chunk) => chunk != null).map((chunk) => chunk!),
+  );
+
+  /// Native failures of a session arrive as [PlatformException]s; apps get [RecorderException]s.
+  /// Every listener gets its own subscription to [source], so listeners come and go freely.
+  static Stream<T> _asRecorderErrors<T>(Stream<T> source) =>
+      Stream<T>.multi((controller) {
+        final subscription = source.listen(
+          controller.addSync,
+          onError: (Object error, StackTrace stackTrace) {
+            controller.addErrorSync(
+              error is PlatformException
+                  ? RecorderException(
+                    RecorderErrorCode.fromWire(error.code),
+                    error.message,
+                  )
+                  : error,
+              stackTrace,
+            );
+          },
+          onDone: controller.closeSync,
+        );
+        controller.onCancel = subscription.cancel;
+      }, isBroadcast: true);
 
   @override
   Future<bool> openAppSettings() async =>
@@ -206,48 +310,5 @@ class MethodChannelFlutterBackgroundVideoRecorder
     } on PlatformException catch (e) {
       throw RecorderException(RecorderErrorCode.fromWire(e.code), e.message);
     }
-  }
-
-  static RecorderStatus _parseStatus(String? status) => switch (status) {
-    'initializing' => RecorderStatus.initializing,
-    'recording' => RecorderStatus.recording,
-    'stopped' => RecorderStatus.stopped,
-    'error' => RecorderStatus.error,
-    _ => RecorderStatus.notInitialized,
-  };
-
-  static RecorderEvent _parseEvent(dynamic event) {
-    final map = event as Map<Object?, Object?>;
-    if (map['type'] == 'preview') {
-      return RecorderEvent.preview(_parsePreview(map));
-    }
-    if (map['type'] == 'warning') {
-      return RecorderEvent.warning(
-        RecorderWarning(
-          RecorderWarningCode.fromWire(map['warningCode'] as String?),
-          map['warningMessage'] as String?,
-        ),
-      );
-    }
-    final status = _parseStatus(map['status'] as String?);
-    final errorCode = map['errorCode'] as String?;
-    final mediaUri = map['mediaUri'] as String?;
-    return RecorderEvent(
-      status,
-      errorCode == null
-          ? null
-          : RecorderException(
-            RecorderErrorCode.fromWire(errorCode),
-            map['errorMessage'] as String?,
-            mediaUri == null
-                ? null
-                : RecordedMedia(
-                  uri: mediaUri,
-                  path: map['mediaPath'] as String?,
-                  kind: _parseKind(map['mediaKind']),
-                  hasLocation: map['mediaHasLocation'] == true,
-                ),
-          ),
-    );
   }
 }

@@ -1,6 +1,6 @@
 name: flutter_background_video_recorder
-description: Record video or audio on Android from a foreground service, even with the screen off. Live preview, selectable resolution, frame rate and codec, optional location.
-version: 2.0.0
+description: Record video or audio on Android from a foreground service, with camera and zoom selection, plus raw camera frames and microphone audio streams for your own processing.
+version: 2.1.0
 repository: https://github.com/ForgottenLight4415/flutter_background_video_recorder
 issue_tracker: https://github.com/ForgottenLight4415/flutter_background_video_recorder/issues
 topics:
@@ -17,6 +17,8 @@ screenshots:
     path: screenshots/recording.png
   - description: Choosing aspect ratio, resolution, frame rate and codec.
     path: screenshots/settings.png
+  - description: The raw frame and audio streams, each read by its own listeners.
+    path: screenshots/streams.png
 
 environment:
   sdk: ^3.7.0
@@ -52,6 +54,7 @@ flutter:
       android:
         package: com.lightsoftware.flutter_background_video_recorder.plugin
         pluginClass: FlutterBackgroundVideoRecorderPlugin
+        ffiPlugin: true
 
   # To add assets to your plugin package, add an assets section, like this:
   # assets:

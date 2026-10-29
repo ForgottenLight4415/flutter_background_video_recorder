@@ -37,11 +37,27 @@ abstract class FlutterBackgroundVideoRecorderPlatform
     throw UnimplementedError('recorderEvents has not been implemented.');
   }
 
-  /// The sizes, frame rates and codecs the chosen camera can record.
-  Future<VideoCapabilities> getVideoCapabilities(CameraFacing cameraFacing) {
+  /// The cameras of the device.
+  Future<List<CameraInfo>> listCameras() {
+    throw UnimplementedError('listCameras() has not been implemented.');
+  }
+
+  /// The sizes, frame rates and codecs the chosen camera can record. A [cameraId] from
+  /// [listCameras] takes precedence over [cameraFacing].
+  Future<VideoCapabilities> getVideoCapabilities(
+    CameraFacing cameraFacing, {
+    String? cameraId,
+  }) {
     throw UnimplementedError(
       'getVideoCapabilities() has not been implemented.',
     );
+  }
+
+  /// Sets the zoom ratio of the open camera and returns the ratio that was applied.
+  ///
+  /// Throws [RecorderErrorCode.cameraNotActive] if no camera is open.
+  Future<double> setZoom(double ratio) {
+    throw UnimplementedError('setZoom() has not been implemented.');
   }
 
   /// Requests permissions if needed and starts the recording service.
@@ -52,6 +68,7 @@ abstract class FlutterBackgroundVideoRecorderPlatform
     required CameraFacing cameraFacing,
     required String notificationTitle,
     required String notificationText,
+    String? cameraId,
     VideoSettings settings = const VideoSettings(),
   }) {
     throw UnimplementedError('startVideoRecording() has not been implemented.');
@@ -76,8 +93,10 @@ abstract class FlutterBackgroundVideoRecorderPlatform
   /// Starts a preview of the camera picture and returns where to find it. See [RecorderPreview].
   Future<PreviewInfo> startPreview({
     required CameraFacing cameraFacing,
+    String? cameraId,
     VideoResolution? resolution,
     bool mirrorFront = true,
+    double initialZoom = 1.0,
   }) {
     throw UnimplementedError('startPreview() has not been implemented.');
   }
@@ -85,6 +104,48 @@ abstract class FlutterBackgroundVideoRecorderPlatform
   /// Ends the preview with the given texture. The recording, if any, is not affected.
   Future<void> stopPreview(int textureId) {
     throw UnimplementedError('stopPreview() has not been implemented.');
+  }
+
+  /// Opens the camera for a frame session. See [FlutterBackgroundVideoRecorder.openFrameSession].
+  Future<RawFrameSessionInfo> openFrameSession({
+    required CameraFacing cameraFacing,
+    required String notificationTitle,
+    required String notificationText,
+    String? cameraId,
+    RawFrameSettings settings = const RawFrameSettings(),
+  }) {
+    throw UnimplementedError('openFrameSession() has not been implemented.');
+  }
+
+  /// Closes the frame session, if one is open.
+  Future<void> closeFrameSession() {
+    throw UnimplementedError('closeFrameSession() has not been implemented.');
+  }
+
+  /// The frames of the open frame session. A broadcast stream: the native side only prepares
+  /// frames while it has a listener. Completes for each listener when the session closes.
+  Stream<RawFrame> get rawFrames {
+    throw UnimplementedError('rawFrames has not been implemented.');
+  }
+
+  /// Opens the microphone for an audio stream. See
+  /// [FlutterBackgroundVideoRecorder.openAudioStream].
+  Future<RawAudioSessionInfo> openAudioStream({
+    required String notificationTitle,
+    required String notificationText,
+    RawAudioSettings settings = const RawAudioSettings(),
+  }) {
+    throw UnimplementedError('openAudioStream() has not been implemented.');
+  }
+
+  /// Closes the audio stream, if one is open.
+  Future<void> closeAudioStream() {
+    throw UnimplementedError('closeAudioStream() has not been implemented.');
+  }
+
+  /// The sound of the open audio stream. A broadcast stream, like [rawFrames].
+  Stream<RawAudioChunk> get rawAudio {
+    throw UnimplementedError('rawAudio has not been implemented.');
   }
 
   /// Opens the app's page in the system settings. Returns false if it could not be opened.
